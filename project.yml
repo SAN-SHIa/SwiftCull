@@ -1,0 +1,41 @@
+name: SwiftCull
+options:
+  bundleIdPrefix: com.swiftcull
+  deploymentTarget:
+    macOS: "14.0"
+  xcodeVersion: "16.0"
+  generateEmptyDirectories: true
+
+settings:
+  base:
+    SWIFT_VERSION: "6.0"
+    MACOSX_DEPLOYMENT_TARGET: "14.0"
+
+targets:
+  SwiftCull:
+    type: application
+    platform: macOS
+    sources:
+      - PhotoFilter-2
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.swiftcull.app
+        INFOPLIST_KEY_CFBundleDisplayName: "SwiftCull"
+        INFOPLIST_KEY_LSApplicationCategoryType: "public.app-category.photography"
+        CODE_SIGN_ENTITLEMENTS: PhotoFilter-2/PhotoFilter-2.entitlements
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+        ENABLE_PREVIEWS: "YES"
+        GENERATE_INFOPLIST_FILE: "YES"
+        SWIFT_STRICT_CONCURRENCY: minimal
+        PRODUCT_NAME: "SwiftCull"
+      configs:
+        debug:
+          CODE_SIGN_IDENTITY: "-"
+          CODE_SIGN_STYLE: Automatic
+        release:
+          CODE_SIGN_IDENTITY: "-"
+          CODE_SIGN_STYLE: Automatic
+    entitlements:
+      path: PhotoFilter-2/PhotoFilter-2.entitlements
+      properties:
+        com.apple.security.app-sandbox: false

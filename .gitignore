@@ -1,0 +1,28 @@
+# Xcode
+build/
+DerivedData/
+*.xcuserstate
+xcuserdata/
+*.xcworkspace/xcuserdata/
+
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+._*
+
+# Swift Package Manager
+.build/
+.swiftpm/
+
+# Thumbnails cache
+~/Library/Caches/SwiftCull/
+
+# IDE
+*.swp
+*.swo
+*~
+.idea/
+
+# Project specific
+dark-avatar.jpg
