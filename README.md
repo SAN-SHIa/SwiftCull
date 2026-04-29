@@ -71,24 +71,24 @@ A native macOS photo management app built with SwiftUI. Designed for photographe
 ```
 SwiftCull/
 ├── App/
-│   └── PhotoFilterApp.swift      # App entry, keyboard monitoring
+│   └── SwiftCullApp.swift         # App entry, keyboard monitoring
 ├── Models/
-│   ├── PhotoEntry.swift          # Photo data model, FinderTagService
-│   └── FilterOptions.swift       # Filter & sort options
+│   ├── PhotoEntry.swift           # Photo data model, FinderTagService
+│   └── FilterOptions.swift        # Filter & sort options
 ├── Services/
-│   ├── FileService.swift         # File system scanning & deletion
-│   ├── RatingService.swift       # Rating persistence (UserDefaults)
-│   ├── TagService.swift          # macOS Finder tag read/write (xattr)
-│   └── ThumbnailService.swift    # Async thumbnail generation & caching
+│   ├── FileService.swift          # File system scanning & deletion
+│   ├── RatingService.swift        # Rating persistence (UserDefaults)
+│   ├── TagService.swift           # macOS Finder tag read/write (xattr)
+│   └── ThumbnailService.swift     # Async thumbnail generation & caching
 ├── ViewModels/
-│   └── PhotoStore.swift          # Central state management
+│   └── PhotoStore.swift           # Central state management
 └── Views/
-    ├── ContentView.swift         # Main layout (NavigationSplitView)
-    ├── FilterSidebar.swift       # Filter & sort panel
-    ├── PhotoGridView.swift       # Photo grid with selection
-    ├── PhotoDetailView.swift     # Photo detail & Quick Look
-    ├── AsyncThumbnailView.swift  # Async thumbnail loading
-    └── RatingView.swift          # Star rating component
+    ├── ContentView.swift          # Main layout (NavigationSplitView)
+    ├── FilterSidebar.swift        # Filter & sort panel
+    ├── PhotoGridView.swift        # Photo grid with selection
+    ├── PhotoDetailView.swift      # Photo detail & Quick Look
+    ├── AsyncThumbnailView.swift   # Async thumbnail loading
+    └── RatingView.swift           # Star rating component
 ```
 
 ## Tag System

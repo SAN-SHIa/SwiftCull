@@ -27,7 +27,17 @@ final class ThumbnailService: Sendable {
         if let cached = cache.object(forKey: id as NSString) {
             return cached
         }
-        return nil
+        return loadFromDiskCache(id: id)
+    }
+
+    private func loadFromDiskCache(id: String) -> NSImage? {
+        let safeId = id.addingPercentEncoding(withAllowedCharacters: .alphanumerics) ?? id
+        let path = diskCacheDir.appendingPathComponent("\(safeId).png").path
+        guard fileManager.fileExists(atPath: path) else { return nil }
+        guard let image = NSImage(contentsOf: URL(fileURLWithPath: path)) else { return nil }
+        let cost = Int(image.size.width * image.size.height * 4)
+        cache.setObject(image, forKey: id as NSString, cost: cost)
+        return image
     }
 
     func generateThumbnail(path: String, id: String, size: CGFloat, completion: @escaping (NSImage) -> Void) {

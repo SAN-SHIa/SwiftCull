@@ -49,13 +49,13 @@ class FinderTagService {
             tagDict[name] = index
         }
 
-        if let favorites = UserDefaults.standard.stringArray(forKey: "FavoriteTagNames") {
-            for name in favorites {
-                let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
-                guard !trimmed.isEmpty else { continue }
-                if tagDict[trimmed] == nil {
-                    tagDict[trimmed] = 0
-                }
+        if tagDict.isEmpty {
+            let fallback: [(String, Int)] = [
+                ("Gray", 1), ("Green", 2), ("Purple", 3),
+                ("Blue", 4), ("Yellow", 5), ("Red", 6), ("Orange", 7)
+            ]
+            for (name, idx) in fallback {
+                tagDict[name] = idx
             }
         }
 
@@ -64,60 +64,53 @@ class FinderTagService {
     }
 
     private func discoverSystemTagNames() -> [(String, Int)] {
-        var result: [(String, Int)] = []
+        var result: [String: Int] = [:]
 
-        let process = Process()
-        process.executableURL = URL(fileURLWithPath: "/usr/bin/python3")
-        let script = """
-import subprocess, plistlib
+        let dirs = [
+            "/Users/sanshi/Desktop",
+            "/Users/sanshi/Documents",
+            "/Users/sanshi/Downloads"
+        ]
 
-def scan_dir(path):
-    m = {}
-    try:
-        for item in subprocess.run(['ls', path], capture_output=True, text=True).stdout.strip().split('\\n'):
-            p = f'{path}/{item}'
-            raw = subprocess.run(['xattr', '-px', 'com.apple.metadata:_kMDItemUserTags', p], capture_output=True, text=True)
-            if raw.returncode == 0 and raw.stdout.strip():
-                hex_s = raw.stdout.strip().replace('\\n','').replace(' ','')
-                if hex_s:
-                    tags = plistlib.loads(bytes.fromhex(hex_s))
-                    for t in tags:
-                        parts = t.split('\\n')
-                        n = parts[0]
-                        c = parts[1] if len(parts)>1 else '0'
-                        if n not in m:
-                            m[n] = c
-    except Exception:
-        pass
-    return m
-
-m = {}
-for d in ['/Users/sanshi/Desktop', '/Users/sanshi/Documents', '/Users/sanshi/Downloads']:
-    m.update(scan_dir(d))
-for k,v in sorted(m.items(), key=lambda x:int(x[1])):
-    print(f'{k}\\t{v}')
-"""
-        process.arguments = ["-c", script]
-        let pipe = Pipe()
-        process.standardOutput = pipe
-        do {
-            try process.run()
-            process.waitUntilExit()
-            let outputData = pipe.fileHandleForReading.readDataToEndOfFile()
-            if let output = String(data: outputData, encoding: .utf8) {
-                for line in output.split(separator: "\n") where !line.isEmpty {
-                    let parts = line.split(separator: "\t")
-                    if parts.count >= 2,
-                       let name = parts.first.map(String.init),
-                       let idxStr = parts.last?.trimmingCharacters(in: .whitespaces),
-                       let idx = Int(idxStr) {
-                        result.append((name, idx))
+        for dir in dirs {
+            let fm = FileManager.default
+            guard let items = try? fm.contentsOfDirectory(atPath: dir) else { continue }
+            for item in items {
+                let path = (dir as NSString).appendingPathComponent(item)
+                let tags = readTagsFromXattr(path: path)
+                for (name, colorIdx) in tags {
+                    if result[name] == nil {
+                        result[name] = colorIdx
                     }
                 }
             }
-        } catch {}
+        }
 
-        return result
+        return result.sorted { $0.value < $1.value }
+    }
+
+    private func readTagsFromXattr(path: String) -> [(String, Int)] {
+        let xattrName = "com.apple.metadata:_kMDItemUserTags"
+        let length = getxattr(path, xattrName, nil, 0, 0, 0)
+        guard length > 0 else { return [] }
+
+        var buffer = [CChar](repeating: 0, count: length)
+        let result = getxattr(path, xattrName, &buffer, length, 0, 0)
+        guard result > 0 else { return [] }
+
+        let data = Data(bytes: buffer, count: result)
+        guard let plist = try? PropertyListSerialization.propertyList(from: data, options: [], format: nil) as? [String] else {
+            return []
+        }
+
+        var tags: [(String, Int)] = []
+        for item in plist {
+            let parts = item.split(separator: "\n")
+            let name = String(parts[0])
+            let colorIdx = parts.count > 1 ? Int(parts[1]) ?? 0 : 0
+            tags.append((name, colorIdx))
+        }
+        return tags
     }
 
     func tag(for name: String) -> FinderTag? {
