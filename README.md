@@ -1,112 +1,112 @@
 # SwiftCull
 
-A native macOS photo management app built with SwiftUI. Designed for photographers who need to quickly cull, rate, tag, and delete photos from SD cards and large directories.
+一款基于 SwiftUI 构建的 macOS 原生照片管理应用。专为摄影师设计，可快速筛选、评分、标记和删除 SD 卡及大型目录中的照片。
 
-## Features
+## 功能特性
 
-- **Photo Scanning** — Read and identify photos (JPG, NEF/RAW, MOV) from SD cards or any directory
-- **Smart Filtering** — Filter by filename, rating, file type (JPG/RAW/RAW+JPG/MOV), and Finder tags
-- **Rating System** — 1-5 star ratings with batch operations
-- **macOS Finder Tags** — Full integration with macOS native tag system, auto-discovers your custom tag names and colors
-- **Quick Look Preview** — Press Space to preview photos, just like Finder
-- **Keyboard Navigation** — Arrow keys to navigate, Space to preview, Delete to remove
-- **Batch Operations** — Select multiple photos and batch set ratings, tags, or delete
-- **One-Click Delete** — Remove both JPG and RAW (NEF) files simultaneously
-- **File Type Badges** — Visual indicators for RAW/RAW+JPG/JPG/MOV on each photo
-- **Thumbnail Caching** — Two-level cache (memory + disk) for fast loading, even with 10GB+ directories
-- **Sort Options** — Sort by name, date, rating, or size in ascending/descending order
+- **照片扫描** — 读取并识别 SD 卡或任意目录中的照片（JPG、NEF/RAW、MOV）
+- **智能筛选** — 按文件名、评分、文件类型（JPG/RAW/RAW+JPG/MOV）和 Finder 标签筛选
+- **评分系统** — 1-5 星评分，支持批量操作
+- **macOS Finder 标签** — 完整集成 macOS 原生标签系统，自动发现自定义标签名称和颜色
+- **Quick Look 预览** — 按空格键预览照片，与 Finder 体验一致
+- **键盘导航** — 方向键导航，空格键预览，Delete 键删除
+- **批量操作** — 多选照片后批量设置评分、标签或删除
+- **一键删除** — 同时删除 JPG 和 RAW（NEF）配对文件
+- **文件类型标识** — 照片上显示 RAW/RAW+JPG/JPG/MOV 类型徽章
+- **缩略图缓存** — 二级缓存（内存 + 磁盘），10GB+ 目录也能快速加载
+- **排序选项** — 按名称、日期、评分或大小排序，支持正序/逆序
 
-## Requirements
+## 系统要求
 
-- macOS 14.0 (Sonoma) or later
-- Xcode 16.0 or later
+- macOS 14.0 (Sonoma) 或更高版本
+- Xcode 16.0 或更高版本
 
-## Build & Run
+## 构建与运行
 
-1. Clone the repository:
+1. 克隆仓库：
    ```bash
    git clone git@github.com:SAN-SHIa/SwiftCull.git
    cd SwiftCull
    ```
 
-2. Generate the Xcode project (requires [XcodeGen](https://github.com/yonaskolb/XcodeGen)):
+2. 生成 Xcode 项目（需要 [XcodeGen](https://github.com/yonaskolb/XcodeGen)）：
    ```bash
    brew install xcodegen
    xcodegen generate
    ```
 
-3. Open and run:
+3. 打开并运行：
    ```bash
    open SwiftCull.xcodeproj
    ```
 
-   Or build from command line:
+   或使用命令行编译：
    ```bash
    xcodebuild -project SwiftCull.xcodeproj -scheme SwiftCull -configuration Debug build
    ```
 
-## Usage
+## 使用方法
 
-1. Launch SwiftCull — it will automatically load photos from the configured path
-2. Click **Open Folder** or press `⌘O` to select a different directory
-3. Click a photo to select it, press **Space** for Quick Look preview
-4. Use **arrow keys** to navigate between photos
-5. Click **Select** button to enter batch selection mode
-6. In selection mode, use the toolbar to batch set ratings, tags, or delete
+1. 启动 SwiftCull — 自动加载配置路径中的照片
+2. 点击**打开文件夹**或按 `⌘O` 选择其他目录
+3. 单击照片选中，按**空格键**进行 Quick Look 大图预览
+4. 使用**方向键**在照片间导航
+5. 点击**选择**按钮进入批量选择模式
+6. 在选择模式中，使用工具栏批量设置评分、标签或删除
 
-### Keyboard Shortcuts
+### 键盘快捷键
 
-| Key | Action |
-|-----|--------|
-| `Space` | Quick Look preview / close preview |
-| `↑ ↓ ← →` | Navigate between photos |
-| `⌘O` | Open folder |
-| `⌘1-5` | Set rating |
-| `⌘0` | Clear rating |
-| `⌘Delete` | Move to trash |
-| `A` | Select all (when not in text field) |
+| 按键 | 操作 |
+|------|------|
+| `空格` | Quick Look 预览 / 关闭预览 |
+| `↑ ↓ ← →` | 在照片间导航 |
+| `⌘O` | 打开文件夹 |
+| `⌘1-5` | 设置评分 |
+| `⌘0` | 清除评分 |
+| `⌘Delete` | 移至废纸篓 |
+| `A` | 全选（非文本输入时） |
 
-## Architecture
+## 项目架构
 
 ```
 SwiftCull/
 ├── App/
-│   └── SwiftCullApp.swift         # App entry, keyboard monitoring
+│   └── SwiftCullApp.swift         # 应用入口，键盘监听
 ├── Models/
-│   ├── PhotoEntry.swift           # Photo data model, FinderTagService
-│   └── FilterOptions.swift        # Filter & sort options
+│   ├── PhotoEntry.swift           # 照片数据模型，FinderTagService
+│   └── FilterOptions.swift        # 筛选与排序选项
 ├── Services/
-│   ├── FileService.swift          # File system scanning & deletion
-│   ├── RatingService.swift        # Rating persistence (UserDefaults)
-│   ├── TagService.swift           # macOS Finder tag read/write (xattr)
-│   └── ThumbnailService.swift     # Async thumbnail generation & caching
+│   ├── FileService.swift          # 文件系统扫描与删除
+│   ├── RatingService.swift        # 评分持久化（UserDefaults）
+│   ├── TagService.swift           # macOS Finder 标签读写（xattr）
+│   └── ThumbnailService.swift     # 异步缩略图生成与缓存
 ├── ViewModels/
-│   └── PhotoStore.swift           # Central state management
+│   └── PhotoStore.swift           # 核心状态管理
 └── Views/
-    ├── ContentView.swift          # Main layout (NavigationSplitView)
-    ├── FilterSidebar.swift        # Filter & sort panel
-    ├── PhotoGridView.swift        # Photo grid with selection
-    ├── PhotoDetailView.swift      # Photo detail & Quick Look
-    ├── AsyncThumbnailView.swift   # Async thumbnail loading
-    └── RatingView.swift           # Star rating component
+    ├── ContentView.swift          # 主布局（NavigationSplitView）
+    ├── FilterSidebar.swift        # 筛选与排序面板
+    ├── PhotoGridView.swift        # 照片网格与选择
+    ├── PhotoDetailView.swift      # 照片详情与 Quick Look
+    ├── AsyncThumbnailView.swift   # 异步缩略图加载
+    └── RatingView.swift           # 星级评分组件
 ```
 
-## Tag System
+## 标签系统
 
-SwiftCull integrates with macOS's native Finder tag system. On launch, it scans your Desktop, Documents, and Downloads folders to discover your custom tag names and their associated colors. Tags written by SwiftCull are fully compatible with Finder — you'll see the same colors and names in both apps.
+SwiftCull 完整集成 macOS 原生 Finder 标签系统。启动时自动扫描桌面、文稿和下载目录，发现自定义标签名称及其关联颜色。SwiftCull 写入的标签与 Finder 完全兼容——两个应用中显示相同的颜色和名称。
 
-macOS color index mapping:
+macOS 颜色编号映射：
 
-| Index | Color |
-|-------|-------|
-| 1 | Gray |
-| 2 | Green |
-| 3 | Purple |
-| 4 | Blue |
-| 5 | Yellow |
-| 6 | Red |
-| 7 | Orange |
+| 编号 | 颜色 |
+|------|------|
+| 1 | 灰色 |
+| 2 | 绿色 |
+| 3 | 紫色 |
+| 4 | 蓝色 |
+| 5 | 黄色 |
+| 6 | 红色 |
+| 7 | 橙色 |
 
-## License
+## 许可证
 
 MIT
