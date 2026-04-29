@@ -67,4 +67,29 @@ struct FilterOptions {
     var tagFilter: String? = nil
     var sortOption: SortOption = .date
     var sortAscending: Bool = false
+
+    var exportFileNameSuffix: String {
+        var parts: [String] = []
+
+        if !searchText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            parts.append(searchText.trimmingCharacters(in: .whitespacesAndNewlines))
+        }
+
+        if ratingFilter != .all {
+            parts.append(ratingFilter.displayName.replacingOccurrences(of: "★", with: "星"))
+        }
+
+        if fileTypeFilter != .all {
+            parts.append(fileTypeFilter.displayName)
+        }
+
+        if let tag = tagFilter {
+            parts.append("标签-\(tag)")
+        }
+
+        parts.append(sortOption.displayName)
+
+        let suffix = parts.isEmpty ? "全部" : parts.joined(separator: "_")
+        return suffix.replacingOccurrences(of: " ", with: "")
+    }
 }

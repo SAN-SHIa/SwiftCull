@@ -8,7 +8,7 @@ struct ContentView: View {
     var body: some View {
         NavigationSplitView(columnVisibility: $sidebarVisibility) {
             FilterSidebar()
-                .navigationSplitViewColumnWidth(250)
+                .navigationSplitViewColumnWidth(260)
         } content: {
             mainContent
         } detail: {

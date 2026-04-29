@@ -20,6 +20,8 @@ class PhotoStore: ObservableObject {
     @Published var errorMessage: String?
     @Published var showingDeleteConfirmation = false
     @Published var photosToDelete: [PhotoEntry] = []
+    @Published var isExporting = false
+    @Published var exportMessage: String?
 
     private let fileService = FileService.shared
     private let tagService = TagService.shared
@@ -392,6 +394,65 @@ class PhotoStore: ObservableObject {
             sourcePath = url.path
             Task {
                 await loadPhotos()
+            }
+        }
+    }
+
+    func exportFilteredPhotos() {
+        guard !filteredPhotos.isEmpty else {
+            exportMessage = "没有可导出的照片"
+            return
+        }
+
+        let dateFormatter = DateFormatter()
+        dateFormatter.dateFormat = "yyyy-MM-dd"
+        let dateStr = dateFormatter.string(from: Date())
+
+        let defaultFileName = "\(dateStr)-\(filterOptions.exportFileNameSuffix)"
+
+        let panel = NSOpenPanel()
+        panel.title = "导出筛选照片"
+        panel.prompt = "选择保存位置"
+        panel.canCreateDirectories = true
+        panel.canChooseDirectories = true
+        panel.canChooseFiles = false
+        panel.allowsMultipleSelection = false
+        panel.message = "将在所选位置创建文件夹「\(defaultFileName)」"
+
+        guard panel.runModal() == .OK, let selectedURL = panel.url else { return }
+
+        let destinationDir = (selectedURL.path as NSString).appendingPathComponent(defaultFileName)
+        isExporting = true
+
+        Task {
+            var exported = 0
+            var failed = 0
+            let fm = FileManager.default
+
+            if !fm.fileExists(atPath: destinationDir) {
+                try? fm.createDirectory(atPath: destinationDir, withIntermediateDirectories: true)
+            }
+
+            for photo in filteredPhotos {
+                let paths: [String] = [photo.jpgPath, photo.nefPath, photo.movPath].compactMap { $0 }
+                for sourcePath in paths {
+                    let fileName = (sourcePath as NSString).lastPathComponent
+                    let destPath = (destinationDir as NSString).appendingPathComponent(fileName)
+                    do {
+                        try fm.copyItem(atPath: sourcePath, toPath: destPath)
+                        exported += 1
+                    } catch {
+                        failed += 1
+                    }
+                }
+            }
+
+            let total = filteredPhotos.count
+            isExporting = false
+            if failed == 0 {
+                exportMessage = "已导出 \(total) 张照片（\(exported) 个文件）"
+            } else {
+                exportMessage = "导出完成：\(total) 张照片，\(exported) 个成功，\(failed) 个失败"
             }
         }
     }

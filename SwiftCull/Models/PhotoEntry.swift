@@ -41,12 +41,39 @@ class FinderTagService {
         loadTags()
     }
 
+    private let finderSidebarColorOrder = [0, 6, 7, 5, 2, 4, 3, 1]
+
+    private func readFinderTagPreferences() -> [String: Int] {
+        guard let tagNames = CFPreferencesCopyAppValue(
+            "FavoriteTagNames" as CFString,
+            "com.apple.finder" as CFString
+        ) as? [String] else {
+            return [:]
+        }
+
+        var result: [String: Int] = [:]
+        for (index, name) in tagNames.enumerated() {
+            guard !name.isEmpty else { continue }
+            if index < finderSidebarColorOrder.count {
+                result[name] = finderSidebarColorOrder[index]
+            }
+        }
+        return result
+    }
+
     func loadTags() {
         var tagDict: [String: Int] = [:]
 
+        let finderPrefs = readFinderTagPreferences()
+        for (name, index) in finderPrefs {
+            tagDict[name] = index
+        }
+
         let discoveredNames = discoverSystemTagNames()
         for (name, index) in discoveredNames {
-            tagDict[name] = index
+            if tagDict[name] == nil {
+                tagDict[name] = index
+            }
         }
 
         if tagDict.isEmpty {
@@ -79,7 +106,7 @@ class FinderTagService {
                 let path = (dir as NSString).appendingPathComponent(item)
                 let tags = readTagsFromXattr(path: path)
                 for (name, colorIdx) in tags {
-                    if result[name] == nil {
+                    if result[name] == nil || (result[name]! <= 1 && colorIdx > 1) {
                         result[name] = colorIdx
                     }
                 }
