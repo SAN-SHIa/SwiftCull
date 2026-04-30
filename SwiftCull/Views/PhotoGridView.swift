@@ -237,26 +237,80 @@ struct PhotoGridContent: View {
     let columns: [GridItem]
     let isSelectMode: Bool
     @Binding var lastSelectedPhoto: PhotoEntry?
+    @State private var itemFrames: [String: CGRect] = [:]
+    @State private var dragStart: CGPoint?
+    @State private var dragCurrent: CGPoint?
+    @State private var selectionBeforeDrag: Set<String> = []
+
+    private let gridCoordinateSpace = "photo-grid-space"
+
+    private var selectionRect: CGRect? {
+        guard let dragStart, let dragCurrent else { return nil }
+        return CGRect(
+            x: min(dragStart.x, dragCurrent.x),
+            y: min(dragStart.y, dragCurrent.y),
+            width: abs(dragCurrent.x - dragStart.x),
+            height: abs(dragCurrent.y - dragStart.y)
+        )
+    }
 
     var body: some View {
         ScrollViewReader { proxy in
-            ScrollView {
-                LazyVGrid(columns: columns, spacing: 4) {
-                    ForEach(store.filteredPhotos) { photo in
-                        SelectablePhotoCardView(
-                            photo: photo,
-                            gridSize: gridSize,
-                            isSelected: store.selectedPhotos.contains(photo.id),
-                            isPrimary: store.selectedPhoto?.id == photo.id,
-                            isSelectMode: isSelectMode
-                        )
-                        .id(photo.id)
-                        .onTapGesture {
-                            handleTap(photo: photo)
+            GeometryReader { geometry in
+                ScrollView {
+                    LazyVGrid(columns: columns, spacing: 4) {
+                        ForEach(store.filteredPhotos) { photo in
+                            SelectablePhotoCardView(
+                                photo: photo,
+                                gridSize: gridSize,
+                                isSelected: store.selectedPhotos.contains(photo.id),
+                                isPrimary: store.selectedPhoto?.id == photo.id,
+                                isSelectMode: isSelectMode
+                            )
+                            .id(photo.id)
+                            .onTapGesture {
+                                handleTap(photo: photo)
+                            }
+                            .background(
+                                GeometryReader { itemGeometry in
+                                    Color.clear.preference(
+                                        key: PhotoItemFramePreferenceKey.self,
+                                        value: [photo.id: itemGeometry.frame(in: .named(gridCoordinateSpace))]
+                                    )
+                                }
+                            )
                         }
                     }
+                    .padding(4)
                 }
-                .padding(4)
+                .coordinateSpace(name: gridCoordinateSpace)
+                .overlay(alignment: .topLeading) {
+                    if let selectionRect {
+                        Rectangle()
+                            .fill(Color.accentColor.opacity(0.14))
+                            .overlay(
+                                Rectangle()
+                                    .stroke(Color.accentColor, lineWidth: 1)
+                            )
+                            .frame(width: selectionRect.width, height: selectionRect.height)
+                            .offset(x: selectionRect.minX, y: selectionRect.minY)
+                            .allowsHitTesting(false)
+                    }
+                }
+                .contentShape(Rectangle())
+                .simultaneousGesture(selectionDragGesture)
+                .onPreferenceChange(PhotoItemFramePreferenceKey.self) { frames in
+                    itemFrames = frames
+                }
+                .onAppear {
+                    updateGridColumnCount(width: geometry.size.width)
+                }
+                .onChange(of: geometry.size.width) { _, width in
+                    updateGridColumnCount(width: width)
+                }
+                .onChange(of: gridSize) { _, _ in
+                    updateGridColumnCount(width: geometry.size.width)
+                }
             }
             .onChange(of: store.selectedPhoto?.id) { _, newId in
                 if let newId = newId {
@@ -266,6 +320,43 @@ struct PhotoGridContent: View {
                 }
             }
         }
+    }
+
+    private var selectionDragGesture: some Gesture {
+        DragGesture(minimumDistance: 6, coordinateSpace: .named(gridCoordinateSpace))
+            .onChanged { value in
+                if dragStart == nil {
+                    dragStart = value.startLocation
+                    selectionBeforeDrag = NSEvent.modifierFlags.contains(.shift) ? store.selectedPhotos : []
+                }
+                dragCurrent = value.location
+                updateDragSelection()
+            }
+            .onEnded { _ in
+                updateDragSelection()
+                dragStart = nil
+                dragCurrent = nil
+                selectionBeforeDrag = []
+            }
+    }
+
+    private func updateDragSelection() {
+        guard let selectionRect else { return }
+        let selectedIds = itemFrames.reduce(into: selectionBeforeDrag) { result, item in
+            if item.value.intersects(selectionRect) {
+                result.insert(item.key)
+            }
+        }
+        store.selectPhotoIds(selectedIds)
+        if let selected = store.selectedPhoto {
+            lastSelectedPhoto = selected
+        }
+    }
+
+    private func updateGridColumnCount(width: CGFloat) {
+        let columnWidth = gridSize + 4
+        let count = max(1, Int((width + 4) / columnWidth))
+        store.updateGridColumnCount(count)
     }
 
     private func handleTap(photo: PhotoEntry) {
@@ -290,6 +381,14 @@ struct PhotoGridContent: View {
                 lastSelectedPhoto = photo
             }
         }
+    }
+}
+
+struct PhotoItemFramePreferenceKey: PreferenceKey {
+    static let defaultValue: [String: CGRect] = [:]
+
+    static func reduce(value: inout [String: CGRect], nextValue: () -> [String: CGRect]) {
+        value.merge(nextValue(), uniquingKeysWith: { _, new in new })
     }
 }
 
@@ -391,6 +490,9 @@ struct SelectablePhotoCardView: View {
         Group {
             if photo.hasAnyMark {
                 HStack(spacing: 3) {
+                    if photo.workflowMark != .none {
+                        workflowBadge
+                    }
                     if photo.rating > 0 {
                         ratingBadge
                     }
@@ -403,6 +505,20 @@ struct SelectablePhotoCardView: View {
                 }
             }
         }
+    }
+
+    private var workflowBadge: some View {
+        HStack(spacing: 2) {
+            Image(systemName: photo.workflowMark == .pick ? "flag.fill" : "xmark")
+                .font(.system(size: 8, weight: .bold))
+            Text(photo.workflowMark == .pick ? "P" : "X")
+                .font(.system(size: 9, weight: .bold))
+        }
+        .foregroundStyle(.white)
+        .padding(.horizontal, 4)
+        .padding(.vertical, 2)
+        .background(photo.workflowMark == .pick ? Color.green.opacity(0.9) : Color.red.opacity(0.9))
+        .clipShape(Capsule())
     }
 
     private var ratingBadge: some View {

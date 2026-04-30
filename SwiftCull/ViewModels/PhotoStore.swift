@@ -6,6 +6,12 @@ struct PhotoSnapshot {
     let photoId: String
     let rating: Int
     let tags: [String]
+    let workflowMark: PhotoWorkflowMark
+}
+
+enum PhotoViewMode {
+    case grid
+    case single
 }
 
 @MainActor
@@ -22,6 +28,9 @@ class PhotoStore: ObservableObject {
     @Published var photosToDelete: [PhotoEntry] = []
     @Published var isExporting = false
     @Published var exportMessage: String?
+    @Published var viewMode: PhotoViewMode = .grid
+    @Published var isSidebarVisible = true
+    @Published var showingShortcutGuide = false
 
     private let fileService = FileService.shared
     private let tagService = TagService.shared
@@ -30,6 +39,7 @@ class PhotoStore: ObservableObject {
     let finderTagService = FinderTagService.shared
 
     private var selectModeSnapshot: [PhotoSnapshot] = []
+    private var gridColumnCount = 1
 
     var photoCount: Int { filteredPhotos.count }
     var totalPhotoCount: Int { photos.count }
@@ -52,6 +62,11 @@ class PhotoStore: ObservableObject {
     func loadPhotos() async {
         isLoading = true
         errorMessage = nil
+        selectedPhoto = nil
+        selectedPhotos = []
+        photosToDelete = []
+        showingDeleteConfirmation = false
+        viewMode = .grid
 
         var isDir: ObjCBool = false
         if !FileManager.default.fileExists(atPath: sourcePath, isDirectory: &isDir) || !isDir.boolValue {
@@ -77,7 +92,9 @@ class PhotoStore: ObservableObject {
     }
 
     private func preloadVisibleThumbnails() {
-        let items = filteredPhotos.prefix(100).map { (id: $0.id, path: $0.primaryFilePath) }
+        let items = filteredPhotos.prefix(100).map { photo in
+            (id: "\(photo.primaryFilePath)|160", path: photo.primaryFilePath)
+        }
         thumbnailService.preloadThumbnails(paths: items, size: 160)
     }
 
@@ -166,6 +183,58 @@ class PhotoStore: ObservableObject {
         if selectedPhoto?.id == photo.id {
             selectedPhoto?.tags = []
         }
+    }
+
+    func toggleSelectedPickMark() {
+        toggleActiveMark(.pick)
+    }
+
+    func toggleSelectedRejectMark() {
+        toggleActiveMark(.reject)
+    }
+
+    func toggleSinglePreview() {
+        if viewMode == .single {
+            viewMode = .grid
+            return
+        }
+        if selectedPhoto == nil, let first = filteredPhotos.first {
+            selectPhoto(first)
+        }
+        if selectedPhoto != nil {
+            viewMode = .single
+        }
+    }
+
+    func toggleSidebar() {
+        isSidebarVisible.toggle()
+    }
+
+    private func markActivePhotos(_ mark: PhotoWorkflowMark) {
+        let ids = activePhotoIds
+        guard !ids.isEmpty else { return }
+
+        for id in ids {
+            if let index = photos.firstIndex(where: { $0.id == id }) {
+                photos[index].workflowMark = mark
+            }
+            if let filteredIndex = filteredPhotos.firstIndex(where: { $0.id == id }) {
+                filteredPhotos[filteredIndex].workflowMark = mark
+            }
+        }
+        if let selected = selectedPhoto, ids.contains(selected.id) {
+            selectedPhoto?.workflowMark = mark
+        }
+    }
+
+    private func toggleActiveMark(_ mark: PhotoWorkflowMark) {
+        let ids = activePhotoIds
+        guard !ids.isEmpty else { return }
+        let shouldClear = ids.allSatisfy { id in
+            filteredPhotos.first { $0.id == id }?.workflowMark == mark ||
+            photos.first { $0.id == id }?.workflowMark == mark
+        }
+        markActivePhotos(shouldClear ? .none : mark)
     }
 
     func batchSetRating(_ rating: Int) {
@@ -261,7 +330,9 @@ class PhotoStore: ObservableObject {
     }
 
     func enterSelectMode() {
-        selectModeSnapshot = photos.map { PhotoSnapshot(photoId: $0.id, rating: $0.rating, tags: $0.tags) }
+        selectModeSnapshot = photos.map {
+            PhotoSnapshot(photoId: $0.id, rating: $0.rating, tags: $0.tags, workflowMark: $0.workflowMark)
+        }
     }
 
     func cancelSelectMode() {
@@ -271,10 +342,12 @@ class PhotoStore: ObservableObject {
                 photos[index].rating = snapshot.rating
                 _ = tagService.setTagsForPhotoPair(snapshot.tags, photo: photos[index])
                 photos[index].tags = snapshot.tags
+                photos[index].workflowMark = snapshot.workflowMark
             }
             if let filteredIndex = filteredPhotos.firstIndex(where: { $0.id == snapshot.photoId }) {
                 filteredPhotos[filteredIndex].rating = snapshot.rating
                 filteredPhotos[filteredIndex].tags = snapshot.tags
+                filteredPhotos[filteredIndex].workflowMark = snapshot.workflowMark
             }
         }
         selectModeSnapshot = []
@@ -328,33 +401,48 @@ class PhotoStore: ObservableObject {
         selectedPhotos = Set(filteredPhotos.map { $0.id })
     }
 
+    func selectPhotoIds(_ ids: Set<String>) {
+        selectedPhotos = ids
+        selectedPhoto = filteredPhotos.first { ids.contains($0.id) }
+    }
+
     func deselectAll() {
         selectedPhotos = []
         selectedPhoto = nil
     }
 
+    func updateGridColumnCount(_ count: Int) {
+        gridColumnCount = max(1, count)
+    }
+
     func navigateToPrevious() {
-        guard let current = selectedPhoto,
-              let index = filteredPhotos.firstIndex(where: { $0.id == current.id }),
-              index > 0 else { return }
-        let prev = filteredPhotos[index - 1]
-        selectedPhoto = prev
-        selectedPhotos = [prev.id]
+        navigate(offset: -1)
     }
 
     func navigateToNext() {
-        guard let current = selectedPhoto,
-              let index = filteredPhotos.firstIndex(where: { $0.id == current.id }),
-              index < filteredPhotos.count - 1 else { return }
-        let next = filteredPhotos[index + 1]
+        navigate(offset: 1)
+    }
+
+    func navigateUp() { navigate(offset: -gridColumnCount) }
+    func navigateDown() { navigate(offset: gridColumnCount) }
+    func navigateLeft() { navigateToPrevious() }
+    func navigateRight() { navigateToNext() }
+
+    private func navigate(offset: Int) {
+        guard !filteredPhotos.isEmpty else { return }
+        let currentIndex: Int
+        if let current = selectedPhoto,
+           let index = filteredPhotos.firstIndex(where: { $0.id == current.id }) {
+            currentIndex = index
+        } else {
+            currentIndex = offset >= 0 ? -1 : filteredPhotos.count
+        }
+
+        let nextIndex = min(max(currentIndex + offset, 0), filteredPhotos.count - 1)
+        let next = filteredPhotos[nextIndex]
         selectedPhoto = next
         selectedPhotos = [next.id]
     }
-
-    func navigateUp() { navigateToPrevious() }
-    func navigateDown() { navigateToNext() }
-    func navigateLeft() { navigateToPrevious() }
-    func navigateRight() { navigateToNext() }
 
     func requestDelete(_ photo: PhotoEntry) {
         photosToDelete = [photo]
@@ -362,7 +450,7 @@ class PhotoStore: ObservableObject {
     }
 
     func requestDeleteSelected() {
-        let entries = selectedPhotoEntries
+        let entries = selectedPhotoEntries.isEmpty ? selectedPhoto.map { [$0] } ?? [] : selectedPhotoEntries
         guard !entries.isEmpty else { return }
         photosToDelete = entries
         showingDeleteConfirmation = true
@@ -455,5 +543,15 @@ class PhotoStore: ObservableObject {
                 exportMessage = "导出完成：\(total) 张照片，\(exported) 个成功，\(failed) 个失败"
             }
         }
+    }
+
+    private var activePhotoIds: Set<String> {
+        if !selectedPhotos.isEmpty {
+            return selectedPhotos
+        }
+        if let selectedPhoto {
+            return [selectedPhoto.id]
+        }
+        return []
     }
 }
