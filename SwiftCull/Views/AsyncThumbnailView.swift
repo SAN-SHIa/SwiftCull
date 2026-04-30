@@ -17,6 +17,10 @@ struct AsyncThumbnailView: View {
     @State private var image: NSImage?
     @State private var loadTask: Task<Void, Never>?
 
+    private var cacheId: String {
+        "\(imagePath)|\(Int(size.rounded()))"
+    }
+
     var body: some View {
         Group {
             if let image = image {
@@ -62,7 +66,7 @@ struct AsyncThumbnailView: View {
             loadTask?.cancel()
             loadTask = nil
         }
-        .onChange(of: imagePath) { _, _ in
+        .onChange(of: cacheId) { _, _ in
             loadTask?.cancel()
             image = nil
             loadThumbnail()
@@ -72,7 +76,7 @@ struct AsyncThumbnailView: View {
     private func loadThumbnail() {
         let service = ThumbnailService.shared
 
-        if let cached = service.getCached(photoId) {
+        if let cached = service.getCached(cacheId) {
             self.image = cached
             return
         }
@@ -81,12 +85,15 @@ struct AsyncThumbnailView: View {
 
         loadTask = Task {
             await withCheckedContinuation { continuation in
-                service.generateThumbnail(path: imagePath, id: photoId, size: size) { newImage in
+                service.generateThumbnail(path: imagePath, id: cacheId, size: size) { newImage in
+                    if let newImage {
+                        self.image = newImage
+                    }
                     continuation.resume()
                 }
             }
             guard !Task.isCancelled else { return }
-            if let cached = service.getCached(photoId) {
+            if let cached = service.getCached(cacheId) {
                 self.image = cached
             }
         }
@@ -95,7 +102,12 @@ struct AsyncThumbnailView: View {
 
 struct DetailThumbnailView: View {
     let photo: PhotoEntry
+    var targetSize: CGFloat = 1000
     @State private var image: NSImage?
+
+    private var cacheId: String {
+        "detail|\(photo.primaryFilePath)|\(Int(targetSize.rounded()))"
+    }
 
     var body: some View {
         Group {
@@ -124,7 +136,7 @@ struct DetailThumbnailView: View {
         .onAppear {
             loadDetailImage()
         }
-        .onChange(of: photo.id) { _, _ in
+        .onChange(of: photo.primaryFilePath) { _, _ in
             image = nil
             loadDetailImage()
         }
@@ -135,18 +147,18 @@ struct DetailThumbnailView: View {
         let path = photo.primaryImagePath
         guard !path.isEmpty else {
             if photo.hasMov, let movPath = photo.movPath {
-                service.generateThumbnail(path: movPath, id: "detail_\(photo.id)", size: 800) { newImage in
+                service.generateThumbnail(path: movPath, id: cacheId, size: targetSize) { newImage in
                     self.image = newImage
                 }
             }
             return
         }
 
-        if let cached = service.getCached("detail_\(photo.id)") {
+        if let cached = service.getCached(cacheId) {
             self.image = cached
         }
 
-        service.generateThumbnail(path: path, id: "detail_\(photo.id)", size: 800) { newImage in
+        service.generateThumbnail(path: path, id: cacheId, size: targetSize) { newImage in
             self.image = newImage
         }
     }

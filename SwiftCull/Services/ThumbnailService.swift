@@ -8,8 +8,7 @@ final class ThumbnailService: Sendable {
 
     private let cache = NSCache<NSString, NSImage>()
     private let queue = DispatchQueue(label: "com.swiftcull.thumbnail", qos: .userInteractive, attributes: .concurrent)
-    private var inProgress: Set<String> = []
-    private let lock = NSLock()
+    private var inProgress: [String: [@MainActor @Sendable (NSImage?) -> Void]] = [:]
 
     private let diskCacheDir: URL
     private let fileManager = FileManager.default
@@ -40,14 +39,17 @@ final class ThumbnailService: Sendable {
         return image
     }
 
-    func generateThumbnail(path: String, id: String, size: CGFloat, completion: @escaping @Sendable (NSImage) -> Void) {
-        lock.lock()
-        if inProgress.contains(id) {
-            lock.unlock()
+    func generateThumbnail(path: String, id: String, size: CGFloat, completion: @escaping @MainActor @Sendable (NSImage?) -> Void) {
+        if let cached = getCached(id) {
+            completion(cached)
             return
         }
-        inProgress.insert(id)
-        lock.unlock()
+
+        if inProgress[id] != nil {
+            inProgress[id]?.append(completion)
+            return
+        }
+        inProgress[id] = [completion]
 
         queue.async { [weak self] in
             let ext = (path as NSString).pathExtension.lowercased()
@@ -55,20 +57,22 @@ final class ThumbnailService: Sendable {
             let image: NSImage?
 
             if videoExtensions.contains(ext) {
-                image = self?.createVideoThumbnail(path: path, maxSize: size)
+                image = Self.createVideoThumbnail(path: path, maxSize: size)
             } else {
-                image = self?.createThumbnail(path: path, maxSize: size)
+                image = Self.createThumbnail(path: path, maxSize: size)
             }
 
-            self?.lock.lock()
-            self?.inProgress.remove(id)
-            self?.lock.unlock()
+            Task { @MainActor in
+                guard let self else { return }
+                let completions = self.inProgress.removeValue(forKey: id) ?? []
 
-            if let image = image {
-                let cost = Int(image.size.width * image.size.height * 4)
-                self?.cache.setObject(image, forKey: id as NSString, cost: cost)
-                self?.saveToDiskCache(image: image, id: id)
-                DispatchQueue.main.async {
+                if let image = image {
+                    let cost = Int(image.size.width * image.size.height * 4)
+                    self.cache.setObject(image, forKey: id as NSString, cost: cost)
+                    self.saveToDiskCache(image: image, id: id)
+                }
+
+                for completion in completions {
                     completion(image)
                 }
             }
@@ -84,7 +88,7 @@ final class ThumbnailService: Sendable {
         try? pngData.write(to: URL(fileURLWithPath: path))
     }
 
-    private func createThumbnail(path: String, maxSize: CGFloat) -> NSImage? {
+    private nonisolated static func createThumbnail(path: String, maxSize: CGFloat) -> NSImage? {
         let url = URL(fileURLWithPath: path)
 
         guard let source = CGImageSourceCreateWithURL(url as CFURL, nil) else {
@@ -106,7 +110,7 @@ final class ThumbnailService: Sendable {
         return NSImage(cgImage: cgImage, size: NSSize(width: cgImage.width, height: cgImage.height))
     }
 
-    private func createVideoThumbnail(path: String, maxSize: CGFloat) -> NSImage? {
+    private nonisolated static func createVideoThumbnail(path: String, maxSize: CGFloat) -> NSImage? {
         let url = URL(fileURLWithPath: path)
         let asset = AVAsset(url: url)
         let generator = AVAssetImageGenerator(asset: asset)
@@ -122,7 +126,7 @@ final class ThumbnailService: Sendable {
         }
     }
 
-    private func createVideoPlaceholder(maxSize: CGFloat) -> NSImage? {
+    private nonisolated static func createVideoPlaceholder(maxSize: CGFloat) -> NSImage? {
         let size = NSSize(width: maxSize, height: maxSize)
         let image = NSImage(size: size)
         image.lockFocus()
@@ -144,7 +148,7 @@ final class ThumbnailService: Sendable {
         return image
     }
 
-    private func fallbackThumbnail(path: String, maxSize: CGFloat) -> NSImage? {
+    private nonisolated static func fallbackThumbnail(path: String, maxSize: CGFloat) -> NSImage? {
         guard let image = NSImage(contentsOf: URL(fileURLWithPath: path)) else { return nil }
         let targetSize = NSSize(width: maxSize, height: maxSize)
         let newImage = NSImage(size: targetSize)
