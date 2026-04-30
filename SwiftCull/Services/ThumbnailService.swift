@@ -40,7 +40,7 @@ final class ThumbnailService: Sendable {
         return image
     }
 
-    func generateThumbnail(path: String, id: String, size: CGFloat, completion: @escaping (NSImage) -> Void) {
+    func generateThumbnail(path: String, id: String, size: CGFloat, completion: @escaping @Sendable (NSImage) -> Void) {
         lock.lock()
         if inProgress.contains(id) {
             lock.unlock()

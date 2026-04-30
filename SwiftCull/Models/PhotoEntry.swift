@@ -93,11 +93,9 @@ class FinderTagService {
     private func discoverSystemTagNames() -> [(String, Int)] {
         var result: [String: Int] = [:]
 
-        let dirs = [
-            "/Users/sanshi/Desktop",
-            "/Users/sanshi/Documents",
-            "/Users/sanshi/Downloads"
-        ]
+        let dirs: [String] = [.desktopDirectory, .documentDirectory, .downloadsDirectory]
+            .flatMap { FileManager.default.urls(for: $0, in: .userDomainMask) }
+            .map(\.path)
 
         for dir in dirs {
             let fm = FileManager.default
