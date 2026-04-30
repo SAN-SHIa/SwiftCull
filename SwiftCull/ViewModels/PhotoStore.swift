@@ -9,6 +9,13 @@ struct PhotoSnapshot {
     let workflowMark: PhotoWorkflowMark
 }
 
+struct DetectedVolume: Identifiable {
+    let id = UUID()
+    let name: String
+    let path: String
+    let icon: String
+}
+
 enum PhotoViewMode {
     case grid
     case single
@@ -22,7 +29,7 @@ class PhotoStore: ObservableObject {
     @Published var selectedPhotos: Set<String> = []
     @Published var filterOptions = FilterOptions()
     @Published var isLoading = false
-    @Published var sourcePath: String = "/Volumes/sandi64G/DCIM/100NZ5_2"
+    @Published var sourcePath: String = ""
     @Published var errorMessage: String?
     @Published var showingDeleteConfirmation = false
     @Published var photosToDelete: [PhotoEntry] = []
@@ -31,6 +38,7 @@ class PhotoStore: ObservableObject {
     @Published var viewMode: PhotoViewMode = .grid
     @Published var isSidebarVisible = true
     @Published var showingShortcutGuide = false
+    @Published var detectedVolumes: [DetectedVolume] = []
 
     private let fileService = FileService.shared
     private let tagService = TagService.shared
@@ -67,6 +75,13 @@ class PhotoStore: ObservableObject {
         photosToDelete = []
         showingDeleteConfirmation = false
         viewMode = .grid
+
+        if sourcePath.isEmpty {
+            photos = []
+            filteredPhotos = []
+            isLoading = false
+            return
+        }
 
         var isDir: ObjCBool = false
         if !FileManager.default.fileExists(atPath: sourcePath, isDirectory: &isDir) || !isDir.boolValue {
@@ -469,6 +484,78 @@ class PhotoStore: ObservableObject {
         selectedPhotos = []
         selectedPhoto = nil
         applyFilters()
+    }
+
+    func detectVolumes() {
+        let fm = FileManager.default
+        let volumesRoot = "/Volumes"
+        guard let volumeNames = try? fm.contentsOfDirectory(atPath: volumesRoot) else {
+            detectedVolumes = []
+            return
+        }
+
+        var results: [DetectedVolume] = []
+
+        let homePath = NSHomeDirectory()
+        let homePictures = (homePath as NSString).appendingPathComponent("Pictures")
+        if fm.fileExists(atPath: homePictures) {
+            results.append(DetectedVolume(name: "图片文件夹", path: homePictures, icon: "photo.on.rectangle"))
+        }
+
+        let homeDesktop = (homePath as NSString).appendingPathComponent("Desktop")
+        if fm.fileExists(atPath: homeDesktop) {
+            results.append(DetectedVolume(name: "桌面", path: homeDesktop, icon: "desktopcomputer"))
+        }
+
+        for name in volumeNames {
+            let volPath = (volumesRoot as NSString).appendingPathComponent(name)
+            var isDir: ObjCBool = false
+            guard fm.fileExists(atPath: volPath, isDirectory: &isDir), isDir.boolValue else { continue }
+
+            let dcimPath = (volPath as NSString).appendingPathComponent("DCIM")
+            if fm.fileExists(atPath: dcimPath) {
+                let dcimSubDirs = scanDCIMSubdirectories(at: dcimPath, volumeName: name)
+                if dcimSubDirs.isEmpty {
+                    results.append(DetectedVolume(name: "\(name) — DCIM", path: dcimPath, icon: "sdcard"))
+                } else {
+                    results.append(contentsOf: dcimSubDirs)
+                }
+                continue
+            }
+
+            let hasMediaFiles = containsMediaFiles(at: volPath)
+            if hasMediaFiles {
+                results.append(DetectedVolume(name: name, path: volPath, icon: "externaldrive"))
+            }
+        }
+
+        detectedVolumes = results
+    }
+
+    private func scanDCIMSubdirectories(at dcimPath: String, volumeName: String) -> [DetectedVolume] {
+        let fm = FileManager.default
+        guard let subDirs = try? fm.contentsOfDirectory(atPath: dcimPath) else { return [] }
+
+        var results: [DetectedVolume] = []
+        for dirName in subDirs {
+            let subPath = (dcimPath as NSString).appendingPathComponent(dirName)
+            var isDir: ObjCBool = false
+            guard fm.fileExists(atPath: subPath, isDirectory: &isDir), isDir.boolValue else { continue }
+            if containsMediaFiles(at: subPath) {
+                results.append(DetectedVolume(name: "\(volumeName) — \(dirName)", path: subPath, icon: "sdcard"))
+            }
+        }
+        return results
+    }
+
+    private func containsMediaFiles(at path: String) -> Bool {
+        let fm = FileManager.default
+        guard let contents = try? fm.contentsOfDirectory(atPath: path) else { return false }
+        let mediaExts: Set<String> = ["jpg", "jpeg", "nef", "cr2", "arw", "raw", "mov", "mp4", "heic", "png", "tiff"]
+        return contents.contains { name in
+            let ext = (name as NSString).pathExtension.lowercased()
+            return mediaExts.contains(ext)
+        }
     }
 
     func selectPath() {

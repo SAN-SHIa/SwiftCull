@@ -49,8 +49,9 @@ struct ContentView: View {
                 Button {
                     store.selectPath()
                 } label: {
-                    Label("打开文件夹", systemImage: "folder")
+                    Label("打开文件夹", systemImage: "folder.badge.plus")
                 }
+                .tint(.accentColor)
 
                 Button {
                     Task { await store.loadPhotos() }
@@ -95,6 +96,7 @@ struct ContentView: View {
             ShortcutGuideView()
         }
         .task {
+            store.detectVolumes()
             await store.loadPhotos()
         }
         .onChange(of: store.selectedPhoto) { _, newValue in
@@ -118,37 +120,10 @@ struct ContentView: View {
                     .foregroundStyle(.secondary)
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
-        } else if store.errorMessage != nil {
-            VStack(spacing: 16) {
-                Image(systemName: "exclamationmark.triangle")
-                    .font(.system(size: 48))
-                    .foregroundStyle(.orange)
-                Text(store.errorMessage!)
-                    .font(.headline)
-                    .foregroundStyle(.secondary)
-                Button("选择文件夹") {
-                    store.selectPath()
-                }
-                .buttonStyle(.borderedProminent)
-            }
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
+        } else if store.sourcePath.isEmpty || store.errorMessage != nil {
+            WelcomeView()
         } else if store.photos.isEmpty {
-            VStack(spacing: 16) {
-                Image(systemName: "photo.on.rectangle.angled")
-                    .font(.system(size: 48))
-                    .foregroundStyle(.secondary)
-                Text("未找到照片")
-                    .font(.headline)
-                    .foregroundStyle(.secondary)
-                Text("请选择包含照片的文件夹")
-                    .font(.subheadline)
-                    .foregroundStyle(.tertiary)
-                Button("选择文件夹") {
-                    store.selectPath()
-                }
-                .buttonStyle(.borderedProminent)
-            }
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            WelcomeView()
         } else if store.viewMode == .single, let photo = store.selectedPhoto {
             PhotoSinglePreviewView(photo: photo)
         } else {
@@ -272,5 +247,92 @@ struct ShortcutGuideView: View {
         }
         .padding(22)
         .frame(width: 430)
+    }
+}
+
+struct WelcomeView: View {
+    @EnvironmentObject var store: PhotoStore
+
+    var body: some View {
+        VStack(spacing: 28) {
+            VStack(spacing: 12) {
+                Image(systemName: "photo.on.rectangle.angled")
+                    .font(.system(size: 56))
+                    .foregroundStyle(.secondary.opacity(0.7))
+
+                Text("SwiftCull")
+                    .font(.title.weight(.bold))
+
+                if store.errorMessage != nil {
+                    Text(store.errorMessage!)
+                        .font(.subheadline)
+                        .foregroundStyle(.orange)
+                        .multilineTextAlignment(.center)
+                } else {
+                    Text("打开一个包含照片的文件夹开始浏览")
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                }
+            }
+
+            Button {
+                store.selectPath()
+            } label: {
+                Label("打开文件夹", systemImage: "folder.badge.plus")
+                    .font(.title3.weight(.semibold))
+                    .frame(maxWidth: 280)
+            }
+            .buttonStyle(.borderedProminent)
+            .controlSize(.large)
+
+            if !store.detectedVolumes.isEmpty {
+                VStack(spacing: 10) {
+                    Text("快速访问")
+                        .font(.subheadline.weight(.medium))
+                        .foregroundStyle(.tertiary)
+
+                    ForEach(store.detectedVolumes) { volume in
+                        Button {
+                            store.sourcePath = volume.path
+                            Task {
+                                await store.loadPhotos()
+                            }
+                        } label: {
+                            HStack(spacing: 10) {
+                                Image(systemName: volume.icon)
+                                    .font(.title3)
+                                    .foregroundStyle(.secondary)
+                                    .frame(width: 28)
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text(volume.name)
+                                        .font(.body.weight(.medium))
+                                        .foregroundStyle(.primary)
+                                    Text(volume.path)
+                                        .font(.caption)
+                                        .foregroundStyle(.tertiary)
+                                        .lineLimit(1)
+                                        .truncationMode(.middle)
+                                }
+                                Spacer()
+                                Image(systemName: "chevron.right")
+                                    .font(.caption.weight(.semibold))
+                                    .foregroundStyle(.quaternary)
+                            }
+                            .padding(.horizontal, 14)
+                            .padding(.vertical, 10)
+                            .background(Color(nsColor: .controlBackgroundColor), in: RoundedRectangle(cornerRadius: 10))
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+                .frame(maxWidth: 360)
+            }
+
+            Text("⌘O 随时打开文件夹")
+                .font(.caption)
+                .foregroundStyle(.quaternary)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .padding()
     }
 }
