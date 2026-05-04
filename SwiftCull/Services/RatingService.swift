@@ -1,7 +1,6 @@
 import Foundation
 
-@MainActor
-class RatingService {
+final class RatingService: @unchecked Sendable {
     static let shared = RatingService()
 
     private let ratingKey = "com.photofilter.rating"

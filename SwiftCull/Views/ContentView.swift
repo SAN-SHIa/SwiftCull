@@ -113,9 +113,9 @@ struct ContentView: View {
     private var mainContent: some View {
         if store.isLoading {
             VStack(spacing: 16) {
-                ProgressView()
-                    .scaleEffect(1.5)
-                Text("正在加载照片...")
+                ProgressView(value: store.loadingProgress)
+                    .frame(width: 220)
+                Text(store.loadingStatus.isEmpty ? "正在加载照片..." : store.loadingStatus)
                     .font(.headline)
                     .foregroundStyle(.secondary)
             }

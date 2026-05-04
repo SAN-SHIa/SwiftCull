@@ -58,7 +58,6 @@ struct AsyncThumbnailView: View {
                 }
             }
         }
-        .drawingGroup()
         .onAppear {
             loadThumbnail()
         }
@@ -74,6 +73,7 @@ struct AsyncThumbnailView: View {
     }
 
     private func loadThumbnail() {
+        loadTask?.cancel()
         let service = ThumbnailService.shared
 
         if let cached = service.getCached(cacheId) {
@@ -83,18 +83,17 @@ struct AsyncThumbnailView: View {
 
         guard !imagePath.isEmpty else { return }
 
+        let requestCacheId = cacheId
+        let requestPath = imagePath
+        let requestSize = size
         loadTask = Task {
-            await withCheckedContinuation { continuation in
-                service.generateThumbnail(path: imagePath, id: cacheId, size: size) { newImage in
-                    if let newImage {
-                        self.image = newImage
-                    }
-                    continuation.resume()
-                }
-            }
+            let newImage = await service.thumbnail(path: requestPath, id: requestCacheId, size: requestSize)
             guard !Task.isCancelled else { return }
-            if let cached = service.getCached(cacheId) {
-                self.image = cached
+            await MainActor.run {
+                guard cacheId == requestCacheId else { return }
+                if let newImage {
+                    self.image = newImage
+                }
             }
         }
     }
@@ -104,6 +103,7 @@ struct DetailThumbnailView: View {
     let photo: PhotoEntry
     var targetSize: CGFloat = 1000
     @State private var image: NSImage?
+    @State private var loadTask: Task<Void, Never>?
 
     private var cacheId: String {
         "detail|\(photo.primaryFilePath)|\(Int(targetSize.rounded()))"
@@ -136,30 +136,40 @@ struct DetailThumbnailView: View {
         .onAppear {
             loadDetailImage()
         }
+        .onDisappear {
+            loadTask?.cancel()
+            loadTask = nil
+        }
         .onChange(of: photo.primaryFilePath) { _, _ in
+            loadTask?.cancel()
             image = nil
             loadDetailImage()
         }
     }
 
     private func loadDetailImage() {
+        loadTask?.cancel()
         let service = ThumbnailService.shared
-        let path = photo.primaryImagePath
+        let path = photo.primaryImagePath.isEmpty ? (photo.movPath ?? "") : photo.primaryImagePath
         guard !path.isEmpty else {
-            if photo.hasMov, let movPath = photo.movPath {
-                service.generateThumbnail(path: movPath, id: cacheId, size: targetSize) { newImage in
-                    self.image = newImage
-                }
-            }
             return
         }
 
+        let requestCacheId = cacheId
         if let cached = service.getCached(cacheId) {
             self.image = cached
+            return
         }
 
-        service.generateThumbnail(path: path, id: cacheId, size: targetSize) { newImage in
-            self.image = newImage
+        let requestPath = path
+        let requestSize = targetSize
+        loadTask = Task {
+            let newImage = await service.thumbnail(path: requestPath, id: requestCacheId, size: requestSize)
+            guard !Task.isCancelled else { return }
+            await MainActor.run {
+                guard cacheId == requestCacheId else { return }
+                self.image = newImage
+            }
         }
     }
 }

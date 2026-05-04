@@ -1,6 +1,6 @@
 import Foundation
 
-enum RatingFilter: Int, CaseIterable, Identifiable {
+enum RatingFilter: Int, CaseIterable, Identifiable, Sendable {
     case all = -1
     case unrated = 0
     case one = 1
@@ -20,7 +20,7 @@ enum RatingFilter: Int, CaseIterable, Identifiable {
     }
 }
 
-enum FileTypeFilter: String, CaseIterable, Identifiable {
+enum FileTypeFilter: String, CaseIterable, Identifiable, Sendable {
     case all = "all"
     case jpgOnly = "jpg"
     case nefOnly = "nef"
@@ -42,7 +42,7 @@ enum FileTypeFilter: String, CaseIterable, Identifiable {
     }
 }
 
-enum SortOption: String, CaseIterable, Identifiable {
+enum SortOption: String, CaseIterable, Identifiable, Sendable {
     case date = "date"
     case name = "name"
     case rating = "rating"
@@ -60,7 +60,7 @@ enum SortOption: String, CaseIterable, Identifiable {
     }
 }
 
-struct FilterOptions {
+struct FilterOptions: Sendable {
     var searchText: String = ""
     var ratingFilter: RatingFilter = .all
     var fileTypeFilter: FileTypeFilter = .all

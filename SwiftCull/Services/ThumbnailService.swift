@@ -1,14 +1,23 @@
 import Foundation
 import AppKit
 import AVFoundation
+import CryptoKit
+import ImageIO
 
-@MainActor
-final class ThumbnailService: Sendable {
+final class ThumbnailService: @unchecked Sendable {
     static let shared = ThumbnailService()
 
+    private struct PendingRequest {
+        let generation: Int
+        var completions: [@MainActor @Sendable (NSImage?) -> Void]
+    }
+
     private let cache = NSCache<NSString, NSImage>()
-    private let queue = DispatchQueue(label: "com.swiftcull.thumbnail", qos: .userInteractive, attributes: .concurrent)
-    private var inProgress: [String: [@MainActor @Sendable (NSImage?) -> Void]] = [:]
+    private let workQueue = DispatchQueue(label: "com.swiftcull.thumbnail.work", qos: .userInitiated, attributes: .concurrent)
+    private let stateQueue = DispatchQueue(label: "com.swiftcull.thumbnail.state")
+    private let generationSemaphore = DispatchSemaphore(value: 4)
+    private var inProgress: [String: PendingRequest] = [:]
+    private var generation = 0
 
     private let diskCacheDir: URL
     private let fileManager = FileManager.default
@@ -23,94 +32,198 @@ final class ThumbnailService: Sendable {
     }
 
     func getCached(_ id: String) -> NSImage? {
-        if let cached = cache.object(forKey: id as NSString) {
-            return cached
-        }
-        return loadFromDiskCache(id: id)
+        cache.object(forKey: id as NSString)
     }
 
-    private func loadFromDiskCache(id: String) -> NSImage? {
-        let safeId = id.addingPercentEncoding(withAllowedCharacters: .alphanumerics) ?? id
-        let path = diskCacheDir.appendingPathComponent("\(safeId).png").path
-        guard fileManager.fileExists(atPath: path) else { return nil }
-        guard let image = NSImage(contentsOf: URL(fileURLWithPath: path)) else { return nil }
-        let cost = Int(image.size.width * image.size.height * 4)
-        cache.setObject(image, forKey: id as NSString, cost: cost)
-        return image
+    func thumbnail(path: String, id: String, size: CGFloat) async -> NSImage? {
+        if let cached = getCached(id) {
+            return cached
+        }
+
+        return await withCheckedContinuation { continuation in
+            generateThumbnail(path: path, id: id, size: size) { image in
+                continuation.resume(returning: image)
+            }
+        }
     }
 
     func generateThumbnail(path: String, id: String, size: CGFloat, completion: @escaping @MainActor @Sendable (NSImage?) -> Void) {
         if let cached = getCached(id) {
-            completion(cached)
+            Task { @MainActor in
+                completion(cached)
+            }
             return
         }
 
-        if inProgress[id] != nil {
-            inProgress[id]?.append(completion)
+        var requestGeneration = 0
+        let shouldStart = stateQueue.sync {
+            if var pending = inProgress[id] {
+                pending.completions.append(completion)
+                inProgress[id] = pending
+                return false
+            }
+
+            requestGeneration = generation
+            inProgress[id] = PendingRequest(generation: requestGeneration, completions: [completion])
+            return true
+        }
+
+        guard shouldStart else { return }
+
+        let generationForRequest = requestGeneration
+        workQueue.async { [weak self] in
+            self?.produceThumbnail(path: path, id: id, size: size, generation: generationForRequest)
+        }
+    }
+
+    func cancelPending() {
+        stateQueue.sync {
+            generation += 1
+            inProgress.removeAll()
+        }
+    }
+
+    func clearCache() {
+        cancelPending()
+        cache.removeAllObjects()
+        try? fileManager.removeItem(at: diskCacheDir)
+        try? fileManager.createDirectory(at: diskCacheDir, withIntermediateDirectories: true)
+    }
+
+    func preloadThumbnails(paths: [(id: String, path: String)], size: CGFloat) {
+        let items = paths
+            .filter { !$0.path.isEmpty && getCached($0.id) == nil }
+            .prefix(80)
+
+        for item in items {
+            generateThumbnail(path: item.path, id: item.id, size: size) { _ in }
+        }
+    }
+
+    private func produceThumbnail(path: String, id: String, size: CGFloat, generation requestGeneration: Int) {
+        generationSemaphore.wait()
+        defer { generationSemaphore.signal() }
+
+        guard isCurrentGeneration(requestGeneration) else {
             return
         }
-        inProgress[id] = [completion]
 
-        queue.async { [weak self] in
-            let ext = (path as NSString).pathExtension.lowercased()
-            let videoExtensions: Set<String> = ["mov", "mp4", "avi"]
-            let image: NSImage?
+        let ext = (path as NSString).pathExtension.lowercased()
+        let videoExtensions: Set<String> = ["mov", "mp4", "avi"]
+        var shouldPersist = false
 
+        var image = loadFromDiskCache(id: id)
+        if image == nil {
             if videoExtensions.contains(ext) {
                 image = Self.createVideoThumbnail(path: path, maxSize: size)
             } else {
                 image = Self.createThumbnail(path: path, maxSize: size)
             }
+            shouldPersist = image != nil
+        }
 
-            Task { @MainActor in
-                guard let self else { return }
-                let completions = self.inProgress.removeValue(forKey: id) ?? []
+        if let image {
+            cache.setObject(image, forKey: id as NSString, cost: Self.cost(for: image))
+            if shouldPersist {
+                saveToDiskCache(image: image, id: id)
+            }
+        }
 
-                if let image = image {
-                    let cost = Int(image.size.width * image.size.height * 4)
-                    self.cache.setObject(image, forKey: id as NSString, cost: cost)
-                    self.saveToDiskCache(image: image, id: id)
-                }
+        let completions = finish(id: id, generation: requestGeneration)
+        guard !completions.isEmpty else { return }
 
-                for completion in completions {
-                    completion(image)
-                }
+        Task { @MainActor in
+            for completion in completions {
+                completion(image)
             }
         }
     }
 
-    private func saveToDiskCache(image: NSImage, id: String) {
-        guard let tiffData = image.tiffRepresentation,
-              let bitmap = NSBitmapImageRep(data: tiffData),
-              let pngData = bitmap.representation(using: .png, properties: [:]) else { return }
-        let safeId = id.addingPercentEncoding(withAllowedCharacters: .alphanumerics) ?? id
-        let path = diskCacheDir.appendingPathComponent("\(safeId).png").path
-        try? pngData.write(to: URL(fileURLWithPath: path))
+    private func isCurrentGeneration(_ requestGeneration: Int) -> Bool {
+        stateQueue.sync {
+            generation == requestGeneration
+        }
     }
 
-    private nonisolated static func createThumbnail(path: String, maxSize: CGFloat) -> NSImage? {
-        let url = URL(fileURLWithPath: path)
+    private func finish(id: String, generation requestGeneration: Int) -> [@MainActor @Sendable (NSImage?) -> Void] {
+        stateQueue.sync {
+            guard inProgress[id]?.generation == requestGeneration else {
+                return []
+            }
+            return inProgress.removeValue(forKey: id)?.completions ?? []
+        }
+    }
 
-        guard let source = CGImageSourceCreateWithURL(url as CFURL, nil) else {
-            return fallbackThumbnail(path: path, maxSize: maxSize)
+    private func loadFromDiskCache(id: String) -> NSImage? {
+        let url = cacheFileURL(for: id)
+        guard fileManager.fileExists(atPath: url.path) else { return nil }
+
+        let sourceOptions: [CFString: Any] = [
+            kCGImageSourceShouldCache: false
+        ]
+        guard let source = CGImageSourceCreateWithURL(url as CFURL, sourceOptions as CFDictionary) else {
+            return nil
         }
 
-        let pixelSize = maxSize * 2.0
-        let options: [CFString: Any] = [
-            kCGImageSourceThumbnailMaxPixelSize: pixelSize,
-            kCGImageSourceCreateThumbnailFromImageAlways: true,
-            kCGImageSourceShouldCacheImmediately: true,
-            kCGImageSourceCreateThumbnailWithTransform: true
+        let imageOptions: [CFString: Any] = [
+            kCGImageSourceShouldCacheImmediately: true
         ]
-
-        guard let cgImage = CGImageSourceCreateThumbnailAtIndex(source, 0, options as CFDictionary) else {
-            return fallbackThumbnail(path: path, maxSize: maxSize)
+        guard let cgImage = CGImageSourceCreateImageAtIndex(source, 0, imageOptions as CFDictionary) else {
+            return nil
         }
 
         return NSImage(cgImage: cgImage, size: NSSize(width: cgImage.width, height: cgImage.height))
     }
 
-    private nonisolated static func createVideoThumbnail(path: String, maxSize: CGFloat) -> NSImage? {
+    private func saveToDiskCache(image: NSImage, id: String) {
+        guard let tiffData = image.tiffRepresentation,
+              let bitmap = NSBitmapImageRep(data: tiffData),
+              let data = bitmap.representation(using: .jpeg, properties: [.compressionFactor: 0.82]) else { return }
+
+        try? data.write(to: cacheFileURL(for: id), options: .atomic)
+    }
+
+    private func cacheFileURL(for id: String) -> URL {
+        let digest = SHA256.hash(data: Data(id.utf8))
+            .map { String(format: "%02x", $0) }
+            .joined()
+        return diskCacheDir.appendingPathComponent("\(digest).jpg")
+    }
+
+    private static func cost(for image: NSImage) -> Int {
+        if let representation = image.representations.first {
+            return representation.pixelsWide * representation.pixelsHigh * 4
+        }
+        return Int(image.size.width * image.size.height * 4)
+    }
+
+    private static func createThumbnail(path: String, maxSize: CGFloat) -> NSImage? {
+        let url = URL(fileURLWithPath: path)
+        let sourceOptions: [CFString: Any] = [
+            kCGImageSourceShouldCache: false
+        ]
+
+        guard let source = CGImageSourceCreateWithURL(url as CFURL, sourceOptions as CFDictionary) else {
+            return nil
+        }
+
+        let pixelSize = max(64, Int(maxSize * 2.0))
+        let options: [CFString: Any] = [
+            kCGImageSourceThumbnailMaxPixelSize: pixelSize,
+            kCGImageSourceCreateThumbnailFromImageAlways: true,
+            kCGImageSourceCreateThumbnailWithTransform: true,
+            kCGImageSourceShouldCache: false,
+            kCGImageSourceShouldCacheImmediately: true
+        ]
+
+        guard let cgImage = CGImageSourceCreateThumbnailAtIndex(source, 0, options as CFDictionary) else {
+            return nil
+        }
+
+        return NSImage(cgImage: cgImage, size: NSSize(width: cgImage.width, height: cgImage.height))
+    }
+
+    private static func createVideoThumbnail(path: String, maxSize: CGFloat) -> NSImage? {
         let url = URL(fileURLWithPath: path)
         let asset = AVAsset(url: url)
         let generator = AVAssetImageGenerator(asset: asset)
@@ -118,69 +231,10 @@ final class ThumbnailService: Sendable {
         generator.maximumSize = CGSize(width: maxSize * 2, height: maxSize * 2)
 
         let time = CMTime(seconds: 0.5, preferredTimescale: 600)
-        do {
-            let cgImage = try generator.copyCGImage(at: time, actualTime: nil)
-            return NSImage(cgImage: cgImage, size: NSSize(width: cgImage.width, height: cgImage.height))
-        } catch {
-            return createVideoPlaceholder(maxSize: maxSize)
+        guard let cgImage = try? generator.copyCGImage(at: time, actualTime: nil) else {
+            return nil
         }
-    }
 
-    private nonisolated static func createVideoPlaceholder(maxSize: CGFloat) -> NSImage? {
-        let size = NSSize(width: maxSize, height: maxSize)
-        let image = NSImage(size: size)
-        image.lockFocus()
-        NSColor.windowBackgroundColor.setFill()
-        NSRect(origin: .zero, size: size).fill()
-
-        let attrs: [NSAttributedString.Key: Any] = [
-            .font: NSFont.systemFont(ofSize: maxSize * 0.3, weight: .light),
-            .foregroundColor: NSColor.secondaryLabelColor
-        ]
-        let text = "🎬"
-        let textRect = text.boundingRect(with: size, options: [], attributes: attrs)
-        let textPoint = CGPoint(
-            x: (size.width - textRect.width) / 2,
-            y: (size.height - textRect.height) / 2
-        )
-        text.draw(at: textPoint, withAttributes: attrs)
-        image.unlockFocus()
-        return image
-    }
-
-    private nonisolated static func fallbackThumbnail(path: String, maxSize: CGFloat) -> NSImage? {
-        guard let image = NSImage(contentsOf: URL(fileURLWithPath: path)) else { return nil }
-        let targetSize = NSSize(width: maxSize, height: maxSize)
-        let newImage = NSImage(size: targetSize)
-        newImage.lockFocus()
-        image.draw(in: NSRect(origin: .zero, size: targetSize),
-                   from: NSRect(origin: .zero, size: image.size),
-                   operation: .copy,
-                   fraction: 1.0)
-        newImage.unlockFocus()
-        return newImage
-    }
-
-    func clearCache() {
-        cache.removeAllObjects()
-        try? fileManager.removeItem(at: diskCacheDir)
-        try? fileManager.createDirectory(at: diskCacheDir, withIntermediateDirectories: true)
-    }
-
-    func preloadThumbnails(paths: [(id: String, path: String)], size: CGFloat) {
-        let batchSize = 30
-        let items = paths.filter { getCached($0.id) == nil }
-        let batches = stride(from: 0, to: items.count, by: batchSize)
-
-        for (batchIndex, startIndex) in batches.enumerated() {
-            let endIndex = min(startIndex + batchSize, items.count)
-            let batch = Array(items[startIndex..<endIndex])
-
-            DispatchQueue.main.asyncAfter(deadline: .now() + Double(batchIndex) * 0.15) {
-                for item in batch {
-                    self.generateThumbnail(path: item.path, id: item.id, size: size) { _ in }
-                }
-            }
-        }
+        return NSImage(cgImage: cgImage, size: NSSize(width: cgImage.width, height: cgImage.height))
     }
 }

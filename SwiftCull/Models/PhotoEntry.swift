@@ -1,7 +1,7 @@
 import SwiftUI
 import ImageIO
 
-struct FinderTag: Identifiable, Hashable {
+struct FinderTag: Identifiable, Hashable, Sendable {
     let name: String
     let colorIndex: Int
 
@@ -143,6 +143,10 @@ class FinderTagService {
         availableTags.first { $0.name == name }
     }
 
+    var tagColorLookup: [String: Int] {
+        Dictionary(uniqueKeysWithValues: availableTags.map { ($0.name, $0.colorIndex) })
+    }
+
     func colorForTag(_ name: String) -> Color {
         tag(for: name)?.color ?? Color(red: 142/255, green: 142/255, blue: 147/255)
     }
@@ -152,13 +156,13 @@ class FinderTagService {
     }
 }
 
-enum PhotoWorkflowMark: String, Hashable {
+enum PhotoWorkflowMark: String, Hashable, Sendable {
     case none
     case pick
     case reject
 }
 
-struct PhotoExifInfo: Hashable {
+struct PhotoExifInfo: Hashable, Sendable {
     let camera: String?
     let lens: String?
     let focalLength: String?
@@ -278,13 +282,34 @@ struct PhotoExifInfo: Hashable {
     }
 }
 
+actor PhotoExifCache {
+    static let shared = PhotoExifCache()
+
+    private var cache: [String: PhotoExifInfo] = [:]
+
+    func info(for path: String, fallbackDate: Date) -> PhotoExifInfo {
+        let key = "\(path)|\(fallbackDate.timeIntervalSince1970)"
+        if let cached = cache[key] {
+            return cached
+        }
+
+        let info = PhotoExifInfo.load(from: path, fallbackDate: fallbackDate)
+        cache[key] = info
+        return info
+    }
+
+    func clear() {
+        cache.removeAll()
+    }
+}
+
 private extension String {
     var nilIfEmpty: String? {
         isEmpty ? nil : self
     }
 }
 
-struct PhotoEntry: Identifiable, Hashable {
+struct PhotoEntry: Identifiable, Hashable, Sendable {
     let id: String
     let baseName: String
     let jpgPath: String?
@@ -294,13 +319,14 @@ struct PhotoEntry: Identifiable, Hashable {
     let nefFileSize: Int64?
     let movFileSize: Int64?
     let fileDate: Date
+    let modificationDate: Date
     var rating: Int
     var tags: [String]
     var isDeleted: Bool
     var workflowMark: PhotoWorkflowMark
 
     init(baseName: String, jpgPath: String?, nefPath: String?, movPath: String?,
-         jpgFileSize: Int64?, nefFileSize: Int64?, movFileSize: Int64?, fileDate: Date) {
+         jpgFileSize: Int64?, nefFileSize: Int64?, movFileSize: Int64?, fileDate: Date, modificationDate: Date) {
         self.id = baseName
         self.baseName = baseName
         self.jpgPath = jpgPath
@@ -310,6 +336,7 @@ struct PhotoEntry: Identifiable, Hashable {
         self.nefFileSize = nefFileSize
         self.movFileSize = movFileSize
         self.fileDate = fileDate
+        self.modificationDate = modificationDate
         self.rating = 0
         self.tags = []
         self.isDeleted = false
@@ -332,10 +359,21 @@ struct PhotoEntry: Identifiable, Hashable {
     }
 
     var formattedDate: String {
+        formattedCaptureDate
+    }
+
+    var formattedCaptureDate: String {
         let formatter = DateFormatter()
         formatter.dateStyle = .medium
         formatter.timeStyle = .short
         return formatter.string(from: fileDate)
+    }
+
+    var formattedModificationDate: String {
+        let formatter = DateFormatter()
+        formatter.dateStyle = .medium
+        formatter.timeStyle = .short
+        return formatter.string(from: modificationDate)
     }
 
     var exifInfo: PhotoExifInfo {

@@ -51,6 +51,8 @@ class QuickLookHelper: NSObject, QLPreviewPanelDataSource, QLPreviewPanelDelegat
 struct PhotoDetailView: View {
     @EnvironmentObject var store: PhotoStore
     var showsPreview = true
+    @State private var exifInfo: PhotoExifInfo?
+    @State private var exifTask: Task<Void, Never>?
 
     private var photo: PhotoEntry? {
         store.selectedPhoto
@@ -78,6 +80,16 @@ struct PhotoDetailView: View {
             }
             .background(detailBackground)
             .frame(minWidth: 300, idealWidth: 400)
+            .onAppear {
+                loadExif(for: photo)
+            }
+            .onDisappear {
+                exifTask?.cancel()
+                exifTask = nil
+            }
+            .onChange(of: photo.id) { _, _ in
+                loadExif(for: photo)
+            }
         } else {
             VStack {
                 Image(systemName: "photo.on.rectangle.angled")
@@ -147,16 +159,15 @@ struct PhotoDetailView: View {
                     fileTypePill(photo)
                 }
                 detailRow("大小", photo.formattedSize)
-                detailRow("日期", photo.formattedDate)
+                detailRow("拍摄时间", photo.formattedCaptureDate)
+                detailRow("最后修改", photo.formattedModificationDate)
             }
         }
     }
 
     private func exifSection(_ photo: PhotoEntry) -> some View {
-        let exif = photo.exifInfo
-
-        return DetailCard(title: "EXIF 信息", systemImage: "camera.aperture") {
-            if exif.hasAnyValue {
+        DetailCard(title: "EXIF 信息", systemImage: "camera.aperture") {
+            if let exif = exifInfo, exif.hasAnyValue {
                 VStack(spacing: 6) {
                     detailRow("相机", exif.camera ?? "未提供", canSelect: true)
                     detailRow("镜头", exif.lens ?? "未提供", canSelect: true)
@@ -170,8 +181,36 @@ struct PhotoDetailView: View {
                     }
                     detailRow("拍摄时间", exif.capturedAt ?? "未提供", canSelect: true)
                 }
+            } else if exifInfo == nil {
+                HStack(spacing: 8) {
+                    ProgressView()
+                        .scaleEffect(0.65)
+                    Text("正在读取 EXIF...")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
             } else {
                 emptyHint("未读取到 EXIF 信息")
+            }
+        }
+    }
+
+    private func loadExif(for photo: PhotoEntry) {
+        exifTask?.cancel()
+        exifInfo = nil
+
+        let photoID = photo.id
+        let path = photo.primaryImagePath
+        let fallbackDate = photo.fileDate
+
+        exifTask = Task {
+            let info = await PhotoExifCache.shared.info(for: path, fallbackDate: fallbackDate)
+            guard !Task.isCancelled else { return }
+
+            await MainActor.run {
+                guard store.selectedPhoto?.id == photoID else { return }
+                exifInfo = info
             }
         }
     }

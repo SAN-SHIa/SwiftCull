@@ -1,10 +1,41 @@
 import SwiftUI
 
+private enum PhotoGroupingMode: String, CaseIterable, Identifiable {
+    case all
+    case month
+    case day
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .all: return "所有"
+        case .month: return "月"
+        case .day: return "日"
+        }
+    }
+
+    var systemImage: String {
+        switch self {
+        case .all: return "photo.stack"
+        case .month: return "calendar"
+        case .day: return "calendar.day.timeline.left"
+        }
+    }
+}
+
+private enum PhotoSelectionScope {
+    case all
+    case month
+    case day
+}
+
 struct PhotoGridView: View {
     @EnvironmentObject var store: PhotoStore
     @State private var gridSize: CGFloat = 160
     @State private var lastSelectedPhoto: PhotoEntry?
     @State private var isSelectMode = false
+    @State private var groupingMode: PhotoGroupingMode = .all
     private let minGridSize: CGFloat = 100
     private let maxGridSize: CGFloat = 300
 
@@ -15,21 +46,22 @@ struct PhotoGridView: View {
     var body: some View {
         VStack(spacing: 0) {
             gridToolbar
-                .padding(.horizontal, 12)
-                .padding(.vertical, 6)
-                .background(Color(nsColor: .controlBackgroundColor).opacity(0.5))
+                .padding(.horizontal, 22)
+                .padding(.vertical, 7)
+                .background(.bar)
 
-            if isSelectMode && store.selectedCount > 0 {
-                batchActionBar
-                    .padding(.horizontal, 12)
-                    .padding(.vertical, 8)
-                    .background(Color.accentColor.opacity(0.08))
-            }
+            Divider()
+
+            selectionCommandPanel
+                .padding(.horizontal, 22)
+                .padding(.vertical, 8)
+                .background(.bar)
 
             Divider()
 
             photoContent
-    }
+        }
+        .animation(.snappy(duration: 0.24), value: store.selectedCount)
     }
 
     @ViewBuilder
@@ -49,28 +81,29 @@ struct PhotoGridView: View {
                 store: store,
                 gridSize: gridSize,
                 columns: columns,
-                isSelectMode: isSelectMode,
+                groupingMode: groupingMode,
+                isSelectMode: $isSelectMode,
                 lastSelectedPhoto: $lastSelectedPhoto
             )
         }
     }
 
     private var gridToolbar: some View {
-        HStack {
-            if isSelectMode {
-                selectModeToolbar
-            } else {
-                normalToolbar
+        HStack(spacing: 12) {
+            normalToolbar
+
+            Spacer(minLength: 24)
+
+            HStack(spacing: 12) {
+                Slider(value: $gridSize, in: minGridSize...maxGridSize, step: 20)
+                    .frame(width: 136)
+                    .help("调整缩略图大小")
+
+                Image(systemName: "square.grid.2x2")
+                    .foregroundStyle(.secondary)
+                    .frame(width: 24, height: 24)
             }
-
-            Spacer()
-
-            Slider(value: $gridSize, in: minGridSize...maxGridSize, step: 20)
-                .frame(width: 120)
-                .help("调整缩略图大小")
-
-            Image(systemName: "square.grid.2x2")
-                .foregroundStyle(.secondary)
+            .padding(.trailing, 8)
         }
     }
 
@@ -80,141 +113,299 @@ struct PhotoGridView: View {
                 .font(.caption)
                 .foregroundStyle(.secondary)
 
-            Button {
-                isSelectMode = true
-                store.enterSelectMode()
+            Menu {
+                Button {
+                    beginSelectMode()
+                } label: {
+                    Label("进入选择模式", systemImage: "checkmark.circle")
+                }
+
+                Divider()
+
+                Button {
+                    selectPhotos(.all)
+                } label: {
+                    Label("选择所有照片", systemImage: "photo.stack")
+                }
+
+                Button {
+                    selectPhotos(.month)
+                } label: {
+                    Label("选择当前月份", systemImage: "calendar")
+                }
+                .disabled(selectionReferencePhoto == nil)
+
+                Button {
+                    selectPhotos(.day)
+                } label: {
+                    Label("选择当前日期", systemImage: "calendar.day.timeline.left")
+                }
+                .disabled(selectionReferencePhoto == nil)
             } label: {
                 Label("选择", systemImage: "checkmark.circle")
                     .font(.caption)
             }
+            .menuStyle(.button)
             .buttonStyle(.bordered)
+            .controlSize(.small)
+
+            Picker("分组", selection: $groupingMode) {
+                ForEach(PhotoGroupingMode.allCases) { mode in
+                    Label(mode.title, systemImage: mode.systemImage).tag(mode)
+                }
+            }
+            .pickerStyle(.segmented)
+            .controlSize(.small)
+            .frame(width: 148)
+            .help("按拍摄时间分组")
         }
     }
 
-    private var selectModeToolbar: some View {
+    private var selectionCommandPanel: some View {
+        ViewThatFits(in: .horizontal) {
+            regularSelectionPanel
+            denseSelectionPanel
+        }
+        .padding(.horizontal, 10)
+        .padding(.vertical, 7)
+        .frame(maxWidth: 1280, minHeight: 42, alignment: .leading)
+        .background {
+            RoundedRectangle(cornerRadius: 11, style: .continuous)
+                .fill(.regularMaterial)
+                .overlay {
+                    RoundedRectangle(cornerRadius: 11, style: .continuous)
+                        .fill(Color(nsColor: .windowBackgroundColor).opacity(0.34))
+                }
+        }
+        .overlay {
+            RoundedRectangle(cornerRadius: 11, style: .continuous)
+                .strokeBorder(Color.primary.opacity(0.09), lineWidth: 0.7)
+        }
+        .frame(maxWidth: .infinity, alignment: .center)
+    }
+
+    private var regularSelectionPanel: some View {
+        HStack(spacing: 10) {
+            selectionCommitSection
+            PanelDivider(height: 24)
+            ratingSection
+            PanelDivider(height: 24)
+            tagSection
+            PanelDivider(height: 24)
+            clearSection
+            Spacer(minLength: 8)
+            deleteSection
+        }
+    }
+
+    private var denseSelectionPanel: some View {
         HStack(spacing: 8) {
-            Button {
-                store.confirmSelectMode()
-                isSelectMode = false
-            } label: {
-                Label("完成", systemImage: "checkmark.circle.fill")
-                    .font(.caption)
-            }
-            .buttonStyle(.bordered)
-            .tint(.green)
-
-            Button(role: .destructive) {
-                store.cancelSelectMode()
-                isSelectMode = false
-            } label: {
-                Label("取消", systemImage: "xmark.circle.fill")
-                    .font(.caption)
-            }
-            .buttonStyle(.bordered)
-            .tint(.red)
-
-            Text("已选 \(store.selectedCount) 张")
-                .font(.caption)
-                .foregroundStyle(store.selectedCount > 0 ? .primary : .secondary)
-
-            Button("全选") { store.selectAll() }
-                .font(.caption)
+            compactSelectionCommitSection
+            PanelDivider(height: 22)
+            denseRatingSection
+            PanelDivider(height: 22)
+            denseTagSection
+            PanelDivider(height: 22)
+            denseClearSection
+            Spacer(minLength: 6)
+            deleteSection
         }
     }
 
-    private var batchActionBar: some View {
-        ScrollView(.horizontal, showsIndicators: false) {
-            HStack(spacing: 8) {
-                ratingSection
-                Divider().frame(height: 20)
-                tagSection
-                Divider().frame(height: 20)
-                clearSection
-                Divider().frame(height: 20)
-                deleteSection
+    private var selectionCommitSection: some View {
+        HStack(spacing: 7) {
+            HStack(spacing: 5) {
+                Image(systemName: store.selectedCount > 0 ? "checkmark.circle.fill" : "circle")
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundStyle(store.selectedCount > 0 ? Color.accentColor : Color.secondary)
+                Text(store.selectedCount > 0 ? "\(store.selectedCount) 张" : "未选")
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundStyle(.primary)
+                    .monospacedDigit()
             }
+            .frame(width: 64, alignment: .leading)
+
+            Button {
+                finishSelectMode()
+            } label: {
+                Label("完成", systemImage: "checkmark")
+                    .font(.system(size: 12, weight: .semibold))
+                    .frame(height: 28)
+                    .padding(.horizontal, 8)
+            }
+            .buttonStyle(SelectionPrimaryButtonStyle())
+            .disabled(!isSelectMode)
+
+            Button {
+                cancelSelectMode()
+            } label: {
+                Label("取消", systemImage: "xmark")
+                    .font(.system(size: 12, weight: .semibold))
+                    .frame(height: 28)
+                    .padding(.horizontal, 8)
+            }
+            .buttonStyle(SelectionSecondaryButtonStyle())
+            .disabled(!isSelectMode)
+
+            selectionScopeMenu(width: 30)
+        }
+    }
+
+    private var compactSelectionCommitSection: some View {
+        HStack(spacing: 6) {
+            Text(store.selectedCount > 0 ? "\(store.selectedCount) 张" : "未选")
+                .font(.system(size: 12, weight: .semibold))
+                .foregroundStyle(.primary)
+                .monospacedDigit()
+                .frame(width: 48, alignment: .leading)
+
+            Button {
+                finishSelectMode()
+            } label: {
+                Image(systemName: "checkmark")
+                    .font(.system(size: 13, weight: .semibold))
+            }
+            .buttonStyle(SelectionIconButtonStyle(width: 28, height: 28))
+            .disabled(!isSelectMode)
+            .help("完成")
+
+            Button {
+                cancelSelectMode()
+            } label: {
+                Image(systemName: "xmark")
+                    .font(.system(size: 13, weight: .semibold))
+            }
+            .buttonStyle(SelectionIconButtonStyle(width: 28, height: 28))
+            .disabled(!isSelectMode)
+            .help("取消")
+
+            selectionScopeMenu(width: 28)
         }
     }
 
     private var ratingSection: some View {
-        HStack(spacing: 2) {
-            Text("评分")
-                .font(.caption2)
-                .foregroundStyle(.secondary)
+        HStack(spacing: 6) {
+            BatchSectionLabel(title: "评分", systemImage: "star")
 
             ForEach(1...5, id: \.self) { rating in
                 Button(action: { store.batchSetRating(rating) }) {
-                    VStack(spacing: 1) {
+                    HStack(spacing: 3) {
                         Image(systemName: "star.fill")
-                            .font(.system(size: 10))
+                            .font(.system(size: 13, weight: .semibold))
                             .foregroundStyle(.orange.opacity(0.3 + Double(rating) * 0.14))
                         Text("\(rating)")
-                            .font(.system(size: 8, weight: .semibold))
+                            .font(.system(size: 11, weight: .semibold))
                             .foregroundStyle(.primary)
                     }
                 }
-                .buttonStyle(.plain)
-                .frame(width: 26, height: 28)
-                .background(Color(nsColor: .controlBackgroundColor))
-                .clipShape(RoundedRectangle(cornerRadius: 4))
+                .buttonStyle(SelectionIconButtonStyle(width: 40, height: 30))
+                .disabled(store.selectedCount == 0)
+                .help("\(rating)星")
+            }
+        }
+    }
+
+    private var denseRatingSection: some View {
+        HStack(spacing: 4) {
+            Image(systemName: "star")
+                .font(.system(size: 13, weight: .medium))
+                .foregroundStyle(.secondary)
+                .frame(width: 16)
+
+            ForEach(1...5, id: \.self) { rating in
+                Button(action: { store.batchSetRating(rating) }) {
+                    HStack(spacing: 2) {
+                        Image(systemName: "star.fill")
+                            .font(.system(size: 12, weight: .semibold))
+                            .foregroundStyle(.orange.opacity(0.3 + Double(rating) * 0.14))
+                        Text("\(rating)")
+                            .font(.system(size: 10, weight: .semibold))
+                    }
+                }
+                .buttonStyle(SelectionIconButtonStyle(width: 34, height: 28))
+                .disabled(store.selectedCount == 0)
                 .help("\(rating)星")
             }
         }
     }
 
     private var tagSection: some View {
-        HStack(spacing: 4) {
-            Text("标签")
-                .font(.caption2)
-                .foregroundStyle(.secondary)
+        HStack(spacing: 6) {
+            BatchSectionLabel(title: "标签", systemImage: "tag")
 
             ForEach(store.availableTags) { tag in
                 Button(action: { store.batchAddTag(tag.name) }) {
                     Circle()
                         .fill(tag.color)
                         .frame(width: 14, height: 14)
+                        .overlay(Circle().stroke(.white.opacity(0.72), lineWidth: 1))
                 }
-                .buttonStyle(.plain)
-                .frame(width: 24, height: 28)
-                .background(Color(nsColor: .controlBackgroundColor))
-                .clipShape(RoundedRectangle(cornerRadius: 4))
+                .buttonStyle(SelectionIconButtonStyle(width: 28, height: 28, cornerRadius: 7))
+                .disabled(store.selectedCount == 0)
+                .help(tag.displayName)
+            }
+        }
+    }
+
+    private var denseTagSection: some View {
+        HStack(spacing: 4) {
+            Image(systemName: "tag")
+                .font(.system(size: 13, weight: .medium))
+                .foregroundStyle(.secondary)
+                .frame(width: 16)
+
+            ForEach(store.availableTags) { tag in
+                Button(action: { store.batchAddTag(tag.name) }) {
+                    Circle()
+                        .fill(tag.color)
+                        .frame(width: 13, height: 13)
+                        .overlay(Circle().stroke(.white.opacity(0.72), lineWidth: 1))
+                }
+                .buttonStyle(SelectionIconButtonStyle(width: 24, height: 28, cornerRadius: 7))
+                .disabled(store.selectedCount == 0)
                 .help(tag.displayName)
             }
         }
     }
 
     private var clearSection: some View {
-        HStack(spacing: 4) {
-            Text("清除")
-                .font(.caption2)
-                .foregroundStyle(.secondary)
+        HStack(spacing: 6) {
+            BatchSectionLabel(title: "清除", systemImage: "eraser")
 
             Button(action: { store.batchClearRating() }) {
-                VStack(spacing: 1) {
-                    Image(systemName: "star.slash")
-                        .font(.system(size: 10))
-                    Text("评分")
-                        .font(.system(size: 7))
-                }
+                Image(systemName: "star.slash")
+                    .font(.system(size: 14, weight: .semibold))
             }
-            .buttonStyle(.plain)
-            .frame(width: 36, height: 28)
-            .background(Color(nsColor: .controlBackgroundColor))
-            .clipShape(RoundedRectangle(cornerRadius: 4))
+            .buttonStyle(SelectionIconButtonStyle(width: 34, height: 30))
+            .disabled(store.selectedCount == 0)
             .help("清除评分")
 
             Button(action: { store.batchClearTags() }) {
-                VStack(spacing: 1) {
-                    Image(systemName: "tag.slash")
-                        .font(.system(size: 10))
-                    Text("标签")
-                        .font(.system(size: 7))
-                }
+                Image(systemName: "tag.slash")
+                    .font(.system(size: 14, weight: .semibold))
             }
-            .buttonStyle(.plain)
-            .frame(width: 36, height: 28)
-            .background(Color(nsColor: .controlBackgroundColor))
-            .clipShape(RoundedRectangle(cornerRadius: 4))
+            .buttonStyle(SelectionIconButtonStyle(width: 34, height: 30))
+            .disabled(store.selectedCount == 0)
+            .help("清除标签")
+        }
+    }
+
+    private var denseClearSection: some View {
+        HStack(spacing: 4) {
+            Button(action: { store.batchClearRating() }) {
+                Image(systemName: "star.slash")
+                    .font(.system(size: 13, weight: .semibold))
+            }
+            .buttonStyle(SelectionIconButtonStyle(width: 30, height: 28))
+            .disabled(store.selectedCount == 0)
+            .help("清除评分")
+
+            Button(action: { store.batchClearTags() }) {
+                Image(systemName: "tag.slash")
+                    .font(.system(size: 13, weight: .semibold))
+            }
+            .buttonStyle(SelectionIconButtonStyle(width: 30, height: 28))
+            .disabled(store.selectedCount == 0)
             .help("清除标签")
         }
     }
@@ -224,23 +415,256 @@ struct PhotoGridView: View {
             store.requestDeleteSelected()
         } label: {
             Label("删除", systemImage: "trash")
-                .font(.caption)
+                .font(.caption.weight(.semibold))
+                .padding(.horizontal, 8)
+                .frame(height: 28)
         }
-        .buttonStyle(.bordered)
-        .tint(.red)
+        .buttonStyle(SelectionDestructiveButtonStyle())
+        .disabled(store.selectedCount == 0)
+    }
+
+    private func selectionScopeMenu(width: CGFloat) -> some View {
+        Menu {
+            Button {
+                selectPhotos(.all)
+            } label: {
+                Label("所有照片", systemImage: "photo.stack")
+            }
+
+            Button {
+                selectPhotos(.month)
+            } label: {
+                Label("当前月份", systemImage: "calendar")
+            }
+            .disabled(selectionReferencePhoto == nil)
+
+            Button {
+                selectPhotos(.day)
+            } label: {
+                Label("当前日期", systemImage: "calendar.day.timeline.left")
+            }
+            .disabled(selectionReferencePhoto == nil)
+        } label: {
+            Image(systemName: "checkmark.square")
+                .font(.system(size: 14, weight: .medium))
+        }
+        .menuStyle(.button)
+        .buttonStyle(SelectionIconButtonStyle(width: width, height: 28))
+        .help("按范围选择")
+    }
+
+    private var selectionReferencePhoto: PhotoEntry? {
+        store.selectedPhoto ?? store.selectedPhotoEntries.first ?? store.filteredPhotos.first
+    }
+
+    private func selectPhotos(_ scope: PhotoSelectionScope) {
+        beginSelectMode()
+
+        switch scope {
+        case .all:
+            groupingMode = .all
+            store.selectAll()
+        case .month:
+            groupingMode = .month
+            selectPhotos(matching: .month)
+        case .day:
+            groupingMode = .day
+            selectPhotos(matching: .day)
+        }
+    }
+
+    private func selectPhotos(matching component: Calendar.Component) {
+        guard let reference = selectionReferencePhoto else { return }
+        let calendar = Calendar.current
+        let ids = Set(store.filteredPhotos
+            .filter { calendar.isDate($0.fileDate, equalTo: reference.fileDate, toGranularity: component) }
+            .map(\.id))
+        store.selectPhotoIds(ids)
+    }
+
+    private func beginSelectMode() {
+        guard !isSelectMode else { return }
+        store.enterSelectMode()
+        isSelectMode = true
+    }
+
+    private func finishSelectMode() {
+        store.confirmSelectMode()
+        isSelectMode = false
+        lastSelectedPhoto = nil
+    }
+
+    private func cancelSelectMode() {
+        store.cancelSelectMode()
+        isSelectMode = false
+        lastSelectedPhoto = nil
     }
 }
 
-struct PhotoGridContent: View {
+private struct BatchSectionLabel: View {
+    let title: String
+    let systemImage: String
+
+    var body: some View {
+        Label(title, systemImage: systemImage)
+            .font(.caption2.weight(.semibold))
+            .foregroundStyle(.secondary)
+            .labelStyle(.titleAndIcon)
+    }
+}
+
+private struct PanelDivider: View {
+    var height: CGFloat = 24
+
+    var body: some View {
+        Rectangle()
+            .fill(Color.primary.opacity(0.1))
+            .frame(width: 1, height: height)
+    }
+}
+
+private struct SelectionIconButtonStyle: ButtonStyle {
+    @Environment(\.isEnabled) private var isEnabled
+
+    var width: CGFloat = 34
+    var height: CGFloat = 30
+    var cornerRadius: CGFloat = 9
+
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .foregroundStyle(isEnabled ? Color.primary : Color.secondary.opacity(0.5))
+            .frame(width: width, height: height)
+            .background {
+                RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+                    .fill(Color(nsColor: .controlBackgroundColor).opacity(configuration.isPressed ? 0.85 : 0.58))
+            }
+            .overlay {
+                RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+                    .strokeBorder(Color.primary.opacity(configuration.isPressed ? 0.14 : 0.07), lineWidth: 0.7)
+            }
+            .opacity(isEnabled ? 1 : 0.48)
+            .scaleEffect(configuration.isPressed ? 0.97 : 1)
+            .animation(.snappy(duration: 0.16), value: configuration.isPressed)
+    }
+}
+
+private struct SelectionPrimaryButtonStyle: ButtonStyle {
+    @Environment(\.isEnabled) private var isEnabled
+
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .foregroundStyle(isEnabled ? .white : Color.secondary.opacity(0.55))
+            .background {
+                RoundedRectangle(cornerRadius: 9, style: .continuous)
+                    .fill(isEnabled ? Color.accentColor.opacity(configuration.isPressed ? 0.78 : 0.94) : Color(nsColor: .controlBackgroundColor).opacity(0.58))
+            }
+            .overlay {
+                RoundedRectangle(cornerRadius: 9, style: .continuous)
+                    .strokeBorder(isEnabled ? .white.opacity(0.18) : Color.primary.opacity(0.06), lineWidth: 0.7)
+            }
+            .opacity(isEnabled ? 1 : 0.55)
+            .scaleEffect(configuration.isPressed ? 0.98 : 1)
+            .animation(.snappy(duration: 0.16), value: configuration.isPressed)
+    }
+}
+
+private struct SelectionSecondaryButtonStyle: ButtonStyle {
+    @Environment(\.isEnabled) private var isEnabled
+
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .foregroundStyle(isEnabled ? .primary : Color.secondary.opacity(0.55))
+            .background {
+                RoundedRectangle(cornerRadius: 9, style: .continuous)
+                    .fill(Color(nsColor: .controlBackgroundColor).opacity(configuration.isPressed ? 0.9 : 0.66))
+            }
+            .overlay {
+                RoundedRectangle(cornerRadius: 9, style: .continuous)
+                    .strokeBorder(Color.primary.opacity(configuration.isPressed ? 0.16 : 0.08), lineWidth: 0.7)
+            }
+            .opacity(isEnabled ? 1 : 0.55)
+            .scaleEffect(configuration.isPressed ? 0.98 : 1)
+            .animation(.snappy(duration: 0.16), value: configuration.isPressed)
+    }
+}
+
+private struct SelectionDestructiveButtonStyle: ButtonStyle {
+    @Environment(\.isEnabled) private var isEnabled
+
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .foregroundStyle(isEnabled ? Color.red : Color.secondary.opacity(0.5))
+            .background {
+                RoundedRectangle(cornerRadius: 9, style: .continuous)
+                    .fill(Color.red.opacity(configuration.isPressed ? 0.15 : 0.08))
+            }
+            .overlay {
+                RoundedRectangle(cornerRadius: 9, style: .continuous)
+                    .strokeBorder(Color.red.opacity(isEnabled ? 0.16 : 0.06), lineWidth: 0.7)
+            }
+            .opacity(isEnabled ? 1 : 0.5)
+            .scaleEffect(configuration.isPressed ? 0.98 : 1)
+            .animation(.snappy(duration: 0.16), value: configuration.isPressed)
+    }
+}
+
+private struct PhotoGridSection: Identifiable {
+    let id: String
+    let title: String
+    let subtitle: String
+    let photos: [PhotoEntry]
+}
+
+private struct PhotoGroupHeader: View {
+    let group: PhotoGridSection
+    let isSelectMode: Bool
+    let isSelected: Bool
+    let onToggleSelection: () -> Void
+
+    var body: some View {
+        HStack(spacing: 10) {
+            VStack(alignment: .leading, spacing: 2) {
+                Text(group.title)
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundStyle(.primary)
+                Text(group.subtitle)
+                    .font(.caption2.weight(.medium))
+                    .foregroundStyle(.secondary)
+            }
+
+            Spacer(minLength: 8)
+
+            if isSelectMode {
+                Button(action: onToggleSelection) {
+                    Label(isSelected ? "取消本组" : "选择本组", systemImage: isSelected ? "checkmark.circle.fill" : "circle")
+                        .font(.caption.weight(.semibold))
+                        .labelStyle(.titleAndIcon)
+                        .padding(.horizontal, 9)
+                        .frame(height: 28)
+                }
+                .buttonStyle(SelectionSecondaryButtonStyle())
+                .help(isSelected ? "取消选择本组照片" : "选择本组照片")
+            }
+        }
+        .padding(.horizontal, 8)
+        .padding(.top, 12)
+        .padding(.bottom, 5)
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+}
+
+private struct PhotoGridContent: View {
     @ObservedObject var store: PhotoStore
     let gridSize: CGFloat
     let columns: [GridItem]
-    let isSelectMode: Bool
+    let groupingMode: PhotoGroupingMode
+    @Binding var isSelectMode: Bool
     @Binding var lastSelectedPhoto: PhotoEntry?
     @State private var itemFrames: [String: CGRect] = [:]
     @State private var dragStart: CGPoint?
     @State private var dragCurrent: CGPoint?
-    @State private var selectionBeforeDrag: Set<String> = []
+    @State private var dragBaselineSelection: Set<String> = []
+    @State private var dragSelectionMode: DragSelectionMode = .replace
 
     private let gridCoordinateSpace = "photo-grid-space"
 
@@ -254,65 +678,88 @@ struct PhotoGridContent: View {
         )
     }
 
+    private var photoGroups: [PhotoGridSection] {
+        switch groupingMode {
+        case .all:
+            return [PhotoGridSection(id: "all", title: "所有照片", subtitle: "\(store.filteredPhotos.count) 张", photos: store.filteredPhotos)]
+        case .month:
+            return makePhotoGroups(granularity: .month)
+        case .day:
+            return makePhotoGroups(granularity: .day)
+        }
+    }
+
     var body: some View {
         ScrollViewReader { proxy in
             GeometryReader { geometry in
                 ScrollView {
                     LazyVGrid(columns: columns, spacing: 4) {
-                        ForEach(store.filteredPhotos) { photo in
-                            SelectablePhotoCardView(
-                                photo: photo,
-                                gridSize: gridSize,
-                                isSelected: store.selectedPhotos.contains(photo.id),
-                                isPrimary: store.selectedPhoto?.id == photo.id,
-                                isSelectMode: isSelectMode
-                            )
-                            .id(photo.id)
-                            .onTapGesture {
-                                handleTap(photo: photo)
+                        if groupingMode == .all {
+                            ForEach(store.filteredPhotos) { photo in
+                                photoCard(photo)
                             }
-                            .background(
-                                GeometryReader { itemGeometry in
-                                    Color.clear.preference(
-                                        key: PhotoItemFramePreferenceKey.self,
-                                        value: [photo.id: itemGeometry.frame(in: .named(gridCoordinateSpace))]
-                                    )
+                        } else {
+                            ForEach(photoGroups) { group in
+                                Section {
+                                    ForEach(group.photos) { photo in
+                                        photoCard(photo)
+                                    }
+                                } header: {
+                                    PhotoGroupHeader(
+                                        group: group,
+                                        isSelectMode: isSelectMode,
+                                        isSelected: isGroupSelected(group)
+                                    ) {
+                                        toggleGroupSelection(group)
+                                    }
                                 }
-                            )
+                            }
                         }
                     }
                     .padding(4)
-                }
-                .coordinateSpace(name: gridCoordinateSpace)
-                .overlay(alignment: .topLeading) {
-                    if let selectionRect {
-                        Rectangle()
-                            .fill(Color.accentColor.opacity(0.14))
-                            .overlay(
-                                Rectangle()
-                                    .stroke(Color.accentColor, lineWidth: 1)
-                            )
-                            .frame(width: selectionRect.width, height: selectionRect.height)
-                            .offset(x: selectionRect.minX, y: selectionRect.minY)
-                            .allowsHitTesting(false)
+                    .coordinateSpace(name: gridCoordinateSpace)
+                    .overlay(alignment: .topLeading) {
+                        if let selectionRect {
+                            Rectangle()
+                                .fill(Color.accentColor.opacity(0.14))
+                                .overlay(
+                                    Rectangle()
+                                        .stroke(Color.accentColor, lineWidth: 1)
+                                )
+                                .frame(width: selectionRect.width, height: selectionRect.height)
+                                .offset(x: selectionRect.minX, y: selectionRect.minY)
+                                .allowsHitTesting(false)
+                        }
+                    }
+                    .contentShape(Rectangle())
+                    .simultaneousGesture(selectionDragGesture)
+                    .onPreferenceChange(PhotoItemFramePreferenceKey.self) { frames in
+                        if dragStart == nil {
+                            itemFrames = frames
+                        } else {
+                            itemFrames.merge(frames, uniquingKeysWith: { _, new in new })
+                            updateDragSelection()
+                        }
                     }
                 }
-                .contentShape(Rectangle())
-                .simultaneousGesture(selectionDragGesture)
-                .onPreferenceChange(PhotoItemFramePreferenceKey.self) { frames in
-                    itemFrames = frames
-                }
+                .padding(.horizontal, 14)
                 .onAppear {
                     updateGridColumnCount(width: geometry.size.width)
                 }
                 .onChange(of: geometry.size.width) { _, width in
+                    itemFrames = [:]
                     updateGridColumnCount(width: width)
                 }
                 .onChange(of: gridSize) { _, _ in
+                    itemFrames = [:]
                     updateGridColumnCount(width: geometry.size.width)
+                }
+                .onChange(of: store.filteredPhotos.map(\.id)) { _, _ in
+                    itemFrames = [:]
                 }
             }
             .onChange(of: store.selectedPhoto?.id) { _, newId in
+                guard dragStart == nil else { return }
                 if let newId = newId {
                     withAnimation(.easeOut(duration: 0.15)) {
                         proxy.scrollTo(newId, anchor: .center)
@@ -322,12 +769,98 @@ struct PhotoGridContent: View {
         }
     }
 
+    private func photoCard(_ photo: PhotoEntry) -> some View {
+        SelectablePhotoCardView(
+            photo: photo,
+            gridSize: gridSize,
+            isSelected: store.selectedPhotos.contains(photo.id),
+            isPrimary: store.selectedPhoto?.id == photo.id,
+            isSelectMode: isSelectMode
+        )
+        .id(photo.id)
+        .onAppear {
+            store.preloadThumbnails(around: photo, size: gridSize)
+        }
+        .onTapGesture {
+            handleTap(photo: photo)
+        }
+        .background(
+            GeometryReader { itemGeometry in
+                Color.clear.preference(
+                    key: PhotoItemFramePreferenceKey.self,
+                    value: [photo.id: itemGeometry.frame(in: .named(gridCoordinateSpace))]
+                )
+            }
+        )
+    }
+
+    private func makePhotoGroups(granularity: Calendar.Component) -> [PhotoGridSection] {
+        let calendar = Calendar.current
+        let grouped = Dictionary(grouping: store.filteredPhotos) { photo in
+            let components: Set<Calendar.Component> = granularity == .month ? [.year, .month] : [.year, .month, .day]
+            return calendar.date(from: calendar.dateComponents(components, from: photo.fileDate)) ?? photo.fileDate
+        }
+
+        let ascending = store.filterOptions.sortAscending
+        return grouped.keys.sorted(by: ascending ? (<) : (>)).map { date in
+            let photos = (grouped[date] ?? []).sorted {
+                ascending ? $0.fileDate < $1.fileDate : $0.fileDate > $1.fileDate
+            }
+            let title = groupTitle(for: date, granularity: granularity)
+            let subtitle = groupSubtitle(for: date, photos: photos, granularity: granularity)
+            return PhotoGridSection(
+                id: "\(granularity)-\(date.timeIntervalSince1970)",
+                title: title,
+                subtitle: subtitle,
+                photos: photos
+            )
+        }
+    }
+
+    private func groupTitle(for date: Date, granularity: Calendar.Component) -> String {
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "zh_CN")
+        formatter.dateFormat = granularity == .month ? "yyyy年M月" : "yyyy年M月d日"
+        return formatter.string(from: date)
+    }
+
+    private func groupSubtitle(for date: Date, photos: [PhotoEntry], granularity: Calendar.Component) -> String {
+        guard granularity == .day else { return "\(photos.count) 张" }
+
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "zh_CN")
+        formatter.dateFormat = "EEEE"
+        return "\(formatter.string(from: date)) · \(photos.count) 张"
+    }
+
+    private func isGroupSelected(_ group: PhotoGridSection) -> Bool {
+        let ids = Set(group.photos.map(\.id))
+        return !ids.isEmpty && ids.isSubset(of: store.selectedPhotos)
+    }
+
+    private func toggleGroupSelection(_ group: PhotoGridSection) {
+        let ids = Set(group.photos.map(\.id))
+        guard !ids.isEmpty else { return }
+
+        if ids.isSubset(of: store.selectedPhotos) {
+            store.selectPhotoIds(store.selectedPhotos.subtracting(ids))
+        } else {
+            store.selectPhotoIds(store.selectedPhotos.union(ids))
+        }
+
+        activateSelectModeIfNeeded()
+        if let selected = store.selectedPhoto {
+            lastSelectedPhoto = selected
+        }
+    }
+
     private var selectionDragGesture: some Gesture {
         DragGesture(minimumDistance: 6, coordinateSpace: .named(gridCoordinateSpace))
             .onChanged { value in
                 if dragStart == nil {
                     dragStart = value.startLocation
-                    selectionBeforeDrag = NSEvent.modifierFlags.contains(.shift) ? store.selectedPhotos : []
+                    dragBaselineSelection = store.selectedPhotos
+                    dragSelectionMode = currentDragSelectionMode
                 }
                 dragCurrent = value.location
                 updateDragSelection()
@@ -336,18 +869,45 @@ struct PhotoGridContent: View {
                 updateDragSelection()
                 dragStart = nil
                 dragCurrent = nil
-                selectionBeforeDrag = []
+                dragBaselineSelection = []
+                dragSelectionMode = .replace
             }
+    }
+
+    private var currentDragSelectionMode: DragSelectionMode {
+        let flags = NSEvent.modifierFlags
+        if flags.contains(.command) {
+            return .toggle
+        }
+        if flags.contains(.shift) {
+            return .add
+        }
+        return .replace
     }
 
     private func updateDragSelection() {
         guard let selectionRect else { return }
-        let selectedIds = itemFrames.reduce(into: selectionBeforeDrag) { result, item in
+
+        let visiblePhotoIds = Set(store.filteredPhotos.map(\.id))
+        let rectSelectedIds = itemFrames.reduce(into: Set<String>()) { result, item in
+            guard visiblePhotoIds.contains(item.key) else { return }
             if item.value.intersects(selectionRect) {
                 result.insert(item.key)
             }
         }
+
+        let selectedIds: Set<String>
+        switch dragSelectionMode {
+        case .replace:
+            selectedIds = rectSelectedIds
+        case .add:
+            selectedIds = dragBaselineSelection.union(rectSelectedIds)
+        case .toggle:
+            selectedIds = dragBaselineSelection.symmetricDifference(rectSelectedIds)
+        }
+
         store.selectPhotoIds(selectedIds)
+        activateSelectModeIfNeeded()
         if let selected = store.selectedPhoto {
             lastSelectedPhoto = selected
         }
@@ -373,15 +933,29 @@ struct PhotoGridContent: View {
         } else {
             if isShiftPressed, let last = lastSelectedPhoto {
                 store.selectRange(from: last, to: photo)
+                activateSelectModeIfNeeded()
             } else if isCommandPressed {
                 store.toggleSelection(photo)
                 lastSelectedPhoto = photo
+                activateSelectModeIfNeeded()
             } else {
                 store.selectPhoto(photo)
                 lastSelectedPhoto = photo
             }
         }
     }
+
+    private func activateSelectModeIfNeeded() {
+        guard !isSelectMode, store.selectedCount > 1 else { return }
+        store.enterSelectMode()
+        isSelectMode = true
+    }
+}
+
+private enum DragSelectionMode {
+    case replace
+    case add
+    case toggle
 }
 
 struct PhotoItemFramePreferenceKey: PreferenceKey {
@@ -553,7 +1127,7 @@ struct SelectablePhotoCardView: View {
                 .truncationMode(.middle)
 
             HStack(spacing: 4) {
-                Text(photo.formattedDate)
+                Text(photo.formattedCaptureDate)
                     .font(.system(size: 7))
                     .foregroundStyle(.secondary)
 

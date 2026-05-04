@@ -2,21 +2,21 @@ import Foundation
 import SwiftUI
 import Combine
 
-struct PhotoSnapshot {
+struct PhotoSnapshot: Sendable {
     let photoId: String
     let rating: Int
     let tags: [String]
     let workflowMark: PhotoWorkflowMark
 }
 
-struct DetectedVolume: Identifiable {
+struct DetectedVolume: Identifiable, Sendable {
     let id = UUID()
     let name: String
     let path: String
     let icon: String
 }
 
-enum PhotoViewMode {
+enum PhotoViewMode: Sendable {
     case grid
     case single
 }
@@ -29,6 +29,8 @@ class PhotoStore: ObservableObject {
     @Published var selectedPhotos: Set<String> = []
     @Published var filterOptions = FilterOptions()
     @Published var isLoading = false
+    @Published var loadingProgress: Double = 0
+    @Published var loadingStatus: String = ""
     @Published var sourcePath: String = ""
     @Published var errorMessage: String?
     @Published var showingDeleteConfirmation = false
@@ -48,6 +50,11 @@ class PhotoStore: ObservableObject {
 
     private var selectModeSnapshot: [PhotoSnapshot] = []
     private var gridColumnCount = 1
+    private var currentLoadID = UUID()
+    private var lastPreheatKey: String?
+    private var tagColorLookup: [String: Int] {
+        finderTagService.tagColorLookup
+    }
 
     var photoCount: Int { filteredPhotos.count }
     var totalPhotoCount: Int { photos.count }
@@ -68,7 +75,13 @@ class PhotoStore: ObservableObject {
     }
 
     func loadPhotos() async {
+        let loadID = UUID()
+        currentLoadID = loadID
+        lastPreheatKey = nil
+        thumbnailService.cancelPending()
         isLoading = true
+        loadingProgress = 0
+        loadingStatus = "准备读取文件夹..."
         errorMessage = nil
         selectedPhoto = nil
         selectedPhotos = []
@@ -80,37 +93,85 @@ class PhotoStore: ObservableObject {
             photos = []
             filteredPhotos = []
             isLoading = false
+            loadingProgress = 0
+            loadingStatus = ""
             return
         }
+
+        loadingStatus = "正在扫描照片文件..."
+        loadingProgress = 0.08
 
         var isDir: ObjCBool = false
         if !FileManager.default.fileExists(atPath: sourcePath, isDirectory: &isDir) || !isDir.boolValue {
             errorMessage = "路径不存在或不是文件夹: \(sourcePath)"
             isLoading = false
+            loadingProgress = 0
+            loadingStatus = ""
             return
         }
 
         let loaded = await fileService.scanDirectory(at: sourcePath)
+        guard currentLoadID == loadID else { return }
 
         var enriched: [PhotoEntry] = []
-        for var photo in loaded {
-            photo.rating = ratingService.getRating(for: photo.id)
-            photo.tags = tagService.getTagsForPhotoPair(photo)
-            enriched.append(photo)
+        enriched.reserveCapacity(loaded.count)
+
+        if loaded.isEmpty {
+            loadingStatus = "未找到可识别的照片"
+            loadingProgress = 1
+        } else {
+            loadingStatus = "正在读取评分与 Finder 标签..."
+            loadingProgress = 0.2
+
+            let chunkSize = 200
+            for startIndex in stride(from: 0, to: loaded.count, by: chunkSize) {
+                let endIndex = min(startIndex + chunkSize, loaded.count)
+                let chunk = Array(loaded[startIndex..<endIndex])
+
+                let partial = await Task.detached(priority: .userInitiated) {
+                    let ratingService = RatingService.shared
+                    let tagService = TagService.shared
+                    return chunk.map { entry in
+                        var photo = entry
+                        photo.rating = ratingService.getRating(for: photo.id)
+                        photo.tags = tagService.getTagsForPhotoPair(photo)
+                        return photo
+                    }
+                }.value
+
+                guard currentLoadID == loadID else { return }
+
+                enriched.append(contentsOf: partial)
+                loadingProgress = 0.2 + 0.65 * (Double(enriched.count) / Double(loaded.count))
+                loadingStatus = "正在读取评分与 Finder 标签 \(enriched.count)/\(loaded.count)"
+            }
         }
 
+        loadingStatus = "正在整理排序..."
+        loadingProgress = 0.9
         photos = enriched
         applyFilters()
+        loadingProgress = 1
+        loadingStatus = "加载完成"
         isLoading = false
-
-        preloadVisibleThumbnails()
     }
 
-    private func preloadVisibleThumbnails() {
-        let items = filteredPhotos.prefix(100).map { photo in
-            (id: "\(photo.primaryFilePath)|160", path: photo.primaryFilePath)
+    func preloadThumbnails(around photo: PhotoEntry, size: CGFloat) {
+        guard let centerIndex = filteredPhotos.firstIndex(where: { $0.id == photo.id }) else { return }
+        let quantizedSize = Int(size.rounded())
+        let key = "\(photo.id)|\(quantizedSize)|\(gridColumnCount)"
+        guard key != lastPreheatKey else { return }
+        lastPreheatKey = key
+
+        let before = gridColumnCount * 2
+        let after = gridColumnCount * 4
+        let lowerBound = max(0, centerIndex - before)
+        let upperBound = min(filteredPhotos.count, centerIndex + after + 1)
+
+        let items = filteredPhotos[lowerBound..<upperBound].map { photo in
+            (id: "\(photo.primaryFilePath)|\(quantizedSize)", path: photo.primaryFilePath)
         }
-        thumbnailService.preloadThumbnails(paths: items, size: 160)
+        thumbnailService.preloadThumbnails(paths: items, size: size)
     }
 
     func applyFilters() {
@@ -278,7 +339,7 @@ class PhotoStore: ObservableObject {
                 var tags = photos[index].tags
                 if !tags.contains(tag) {
                     tags.append(tag)
-                    _ = tagService.setTagsForPhotoPair(tags, photo: photos[index])
+                    _ = tagService.setTagsForPhotoPair(tags, photo: photos[index], colorLookup: tagColorLookup)
                     photos[index].tags = tags
                 }
             }
@@ -319,7 +380,7 @@ class PhotoStore: ObservableObject {
         var currentTags = photos[index].tags
         if !currentTags.contains(tag) {
             currentTags.append(tag)
-            _ = tagService.setTagsForPhotoPair(currentTags, photo: photos[index])
+            _ = tagService.setTagsForPhotoPair(currentTags, photo: photos[index], colorLookup: tagColorLookup)
             photos[index].tags = currentTags
             if let filteredIndex = filteredPhotos.firstIndex(where: { $0.id == photo.id }) {
                 filteredPhotos[filteredIndex].tags = currentTags
@@ -334,7 +395,7 @@ class PhotoStore: ObservableObject {
         guard let index = photos.firstIndex(where: { $0.id == photo.id }) else { return }
         var currentTags = photos[index].tags
         currentTags.removeAll { $0 == tag }
-        _ = tagService.setTagsForPhotoPair(currentTags, photo: photos[index])
+        _ = tagService.setTagsForPhotoPair(currentTags, photo: photos[index], colorLookup: tagColorLookup)
         photos[index].tags = currentTags
         if let filteredIndex = filteredPhotos.firstIndex(where: { $0.id == photo.id }) {
             filteredPhotos[filteredIndex].tags = currentTags
@@ -355,7 +416,7 @@ class PhotoStore: ObservableObject {
             if let index = photos.firstIndex(where: { $0.id == snapshot.photoId }) {
                 ratingService.setRating(snapshot.rating, for: snapshot.photoId)
                 photos[index].rating = snapshot.rating
-                _ = tagService.setTagsForPhotoPair(snapshot.tags, photo: photos[index])
+                _ = tagService.setTagsForPhotoPair(snapshot.tags, photo: photos[index], colorLookup: tagColorLookup)
                 photos[index].tags = snapshot.tags
                 photos[index].workflowMark = snapshot.workflowMark
             }

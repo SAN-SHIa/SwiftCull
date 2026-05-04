@@ -1,7 +1,6 @@
 import Foundation
 
-@MainActor
-class TagService {
+final class TagService: @unchecked Sendable {
     static let shared = TagService()
 
     private let xattrName = "com.apple.metadata:_kMDItemUserTags"
@@ -42,9 +41,9 @@ class TagService {
         return []
     }
 
-    func setTags(_ tags: [String], for path: String) -> Bool {
+    func setTags(_ tags: [String], for path: String, colorLookup: [String: Int] = [:]) -> Bool {
         let taggedArray = tags.map { tag in
-            let color = colorForTag(tag)
+            let color = colorLookup[tag] ?? Self.defaultColorForTag(tag)
             return "\(tag)\n\(color)"
         }
 
@@ -59,10 +58,7 @@ class TagService {
         return false
     }
 
-    private func colorForTag(_ tag: String) -> Int {
-        if let finderTag = FinderTagService.shared.tag(for: tag) {
-            return finderTag.colorIndex
-        }
+    private static func defaultColorForTag(_ tag: String) -> Int {
         let colorMap: [String: Int] = [
             "Gray": 1, "Green": 2, "Purple": 3,
             "Blue": 4, "Yellow": 5, "Red": 6, "Orange": 7
@@ -106,15 +102,15 @@ class TagService {
         return allTags.sorted()
     }
 
-    func setTagsForPhotoPair(_ tags: [String], photo: PhotoEntry) -> Bool {
+    func setTagsForPhotoPair(_ tags: [String], photo: PhotoEntry, colorLookup: [String: Int] = [:]) -> Bool {
         var success = true
         if let jpgPath = photo.jpgPath {
-            if !setTags(tags, for: jpgPath) {
+            if !setTags(tags, for: jpgPath, colorLookup: colorLookup) {
                 success = false
             }
         }
         if let nefPath = photo.nefPath {
-            if !setTags(tags, for: nefPath) {
+            if !setTags(tags, for: nefPath, colorLookup: colorLookup) {
                 success = false
             }
         }
