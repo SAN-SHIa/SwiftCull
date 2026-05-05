@@ -1,3 +1,4 @@
+# ⚡ SwiftCull - 照片快筛
 <div align="center">
   <div>
     <a href="https://github.com/SAN-SHIa/SwiftCull/releases">
@@ -22,8 +23,6 @@
   </div>
   <br>
 </div>
-
-# ⚡ SwiftCull - 照片快筛
 
 ## 🎯 功能特性
 
