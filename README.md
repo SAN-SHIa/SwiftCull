@@ -18,12 +18,8 @@
     </a>
   </div>
   <br>
-  <div>
-    <img src="./imgs/post.png" height="300" alt="SwiftCull logo"/>
-  </div>
-  <br>
 </div>
-
+<img src="./imgs/post.png" alt="SwiftCull" />
 ## 🎯 功能特性
 
 **1. 🚀 极速筛选，告别低效**
