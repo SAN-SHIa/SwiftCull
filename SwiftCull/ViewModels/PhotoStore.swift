@@ -533,18 +533,64 @@ class PhotoStore: ObservableObject {
     }
 
     func confirmDelete() {
-        for photo in photosToDelete {
+        let deleteRequest = photosToDelete
+        let requestedDeleteIds = Set(deleteRequest.map(\.id))
+        let previousFilteredPhotos = filteredPhotos
+        let selectionAnchorIndex = deletionSelectionAnchorIndex(
+            deleteIds: requestedDeleteIds,
+            in: previousFilteredPhotos
+        )
+        var deletedIds: Set<String> = []
+
+        for photo in deleteRequest {
             if fileService.movePhotoToTrash(photo) {
                 if let index = photos.firstIndex(where: { $0.id == photo.id }) {
                     photos[index].isDeleted = true
+                    deletedIds.insert(photo.id)
                 }
             }
         }
+
         photosToDelete = []
         showingDeleteConfirmation = false
-        selectedPhotos = []
-        selectedPhoto = nil
+
+        guard !deletedIds.isEmpty else { return }
+
         applyFilters()
+        selectPhotoAfterDeletion(anchorIndex: selectionAnchorIndex)
+    }
+
+    private func deletionSelectionAnchorIndex(deleteIds: Set<String>, in photos: [PhotoEntry]) -> Int {
+        if let selectedPhoto,
+           deleteIds.contains(selectedPhoto.id),
+           let selectedIndex = photos.firstIndex(where: { $0.id == selectedPhoto.id }) {
+            return selectedIndex
+        }
+
+        let deletedIndexes = photos.indices.filter { deleteIds.contains(photos[$0].id) }
+        if let firstDeletedIndex = deletedIndexes.min() {
+            return firstDeletedIndex
+        }
+
+        if let selectedPhoto,
+           let selectedIndex = photos.firstIndex(where: { $0.id == selectedPhoto.id }) {
+            return selectedIndex
+        }
+
+        return 0
+    }
+
+    private func selectPhotoAfterDeletion(anchorIndex: Int) {
+        guard !filteredPhotos.isEmpty else {
+            selectedPhotos = []
+            selectedPhoto = nil
+            return
+        }
+
+        let nextIndex = min(anchorIndex, filteredPhotos.count - 1)
+        let nextPhoto = filteredPhotos[nextIndex]
+        selectedPhoto = nextPhoto
+        selectedPhotos = [nextPhoto.id]
     }
 
     func detectVolumes() {
