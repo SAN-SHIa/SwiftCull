@@ -34,10 +34,11 @@ struct PhotoGridView: View {
     @EnvironmentObject var store: PhotoStore
     @State private var gridSize: CGFloat = 160
     @State private var lastSelectedPhoto: PhotoEntry?
-    @State private var isSelectMode = false
     @State private var groupingMode: PhotoGroupingMode = .all
     private let minGridSize: CGFloat = 100
     private let maxGridSize: CGFloat = 300
+
+    private var isSelectMode: Bool { store.isSelectMode }
 
     private var columns: [GridItem] {
         [GridItem(.adaptive(minimum: gridSize, maximum: gridSize + 50), spacing: 4)]
@@ -82,7 +83,7 @@ struct PhotoGridView: View {
                 gridSize: gridSize,
                 columns: columns,
                 groupingMode: groupingMode,
-                isSelectMode: $isSelectMode,
+                isSelectMode: store.isSelectMode,
                 lastSelectedPhoto: $lastSelectedPhoto
             )
         }
@@ -483,20 +484,17 @@ struct PhotoGridView: View {
     }
 
     private func beginSelectMode() {
-        guard !isSelectMode else { return }
+        guard !store.isSelectMode else { return }
         store.enterSelectMode()
-        isSelectMode = true
     }
 
     private func finishSelectMode() {
         store.confirmSelectMode()
-        isSelectMode = false
         lastSelectedPhoto = nil
     }
 
     private func cancelSelectMode() {
         store.cancelSelectMode()
-        isSelectMode = false
         lastSelectedPhoto = nil
     }
 }
@@ -658,13 +656,15 @@ private struct PhotoGridContent: View {
     let gridSize: CGFloat
     let columns: [GridItem]
     let groupingMode: PhotoGroupingMode
-    @Binding var isSelectMode: Bool
+    let isSelectMode: Bool
     @Binding var lastSelectedPhoto: PhotoEntry?
     @State private var itemFrames: [String: CGRect] = [:]
     @State private var dragStart: CGPoint?
     @State private var dragCurrent: CGPoint?
     @State private var dragBaselineSelection: Set<String> = []
     @State private var dragSelectionMode: DragSelectionMode = .replace
+    @State private var cachedPhotoIds: Set<String> = []
+    @State private var lastDragUpdateTime: CFAbsoluteTime = 0
 
     private let gridCoordinateSpace = "photo-grid-space"
 
@@ -745,6 +745,7 @@ private struct PhotoGridContent: View {
                 .padding(.horizontal, 14)
                 .onAppear {
                     updateGridColumnCount(width: geometry.size.width)
+                    cachedPhotoIds = Set(store.filteredPhotos.map(\.id))
                 }
                 .onChange(of: geometry.size.width) { _, width in
                     itemFrames = [:]
@@ -756,6 +757,7 @@ private struct PhotoGridContent: View {
                 }
                 .onChange(of: store.filteredPhotos.map(\.id)) { _, _ in
                     itemFrames = [:]
+                    cachedPhotoIds = Set(store.filteredPhotos.map(\.id))
                 }
             }
             .onChange(of: store.selectedPhoto?.id) { _, newId in
@@ -765,6 +767,11 @@ private struct PhotoGridContent: View {
                         proxy.scrollTo(newId, anchor: .center)
                     }
                 }
+            }
+            .task(id: store.viewMode) {
+                guard store.viewMode == .grid, let selectedId = store.selectedPhoto?.id else { return }
+                try? await Task.sleep(for: .milliseconds(150))
+                proxy.scrollTo(selectedId, anchor: .center)
             }
         }
     }
@@ -861,6 +868,7 @@ private struct PhotoGridContent: View {
                     dragStart = value.startLocation
                     dragBaselineSelection = store.selectedPhotos
                     dragSelectionMode = currentDragSelectionMode
+                    lastDragUpdateTime = 0
                 }
                 dragCurrent = value.location
                 updateDragSelection()
@@ -888,9 +896,12 @@ private struct PhotoGridContent: View {
     private func updateDragSelection() {
         guard let selectionRect else { return }
 
-        let visiblePhotoIds = Set(store.filteredPhotos.map(\.id))
+        let now = CFAbsoluteTimeGetCurrent()
+        guard now - lastDragUpdateTime >= 0.016 else { return }
+        lastDragUpdateTime = now
+
         let rectSelectedIds = itemFrames.reduce(into: Set<String>()) { result, item in
-            guard visiblePhotoIds.contains(item.key) else { return }
+            guard cachedPhotoIds.contains(item.key) else { return }
             if item.value.intersects(selectionRect) {
                 result.insert(item.key)
             }
@@ -946,9 +957,8 @@ private struct PhotoGridContent: View {
     }
 
     private func activateSelectModeIfNeeded() {
-        guard !isSelectMode, store.selectedCount > 1 else { return }
+        guard !store.isSelectMode, store.selectedCount > 1 else { return }
         store.enterSelectMode()
-        isSelectMode = true
     }
 }
 

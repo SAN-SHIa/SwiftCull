@@ -26,6 +26,11 @@ struct SwiftCullApp: App {
                 .keyboardShortcut("o", modifiers: .command)
             }
             CommandMenu("照片") {
+                Button("全选") {
+                    store.selectAll()
+                }
+                .keyboardShortcut("a", modifiers: .command)
+                Divider()
                 Button("评分 1 星") {
                     if let photo = store.selectedPhoto { store.setRating(1, for: photo) }
                 }
@@ -117,6 +122,17 @@ struct SwiftCullApp: App {
                 if Self.isTextFieldFocused { return event }
                 store.requestDeleteSelected()
                 return nil
+            case 117: // Forward Delete
+                guard !hasCommandModifier else { return event }
+                if Self.isTextFieldFocused { return event }
+                store.requestDeleteSelected()
+                return nil
+            case 53: // ESC
+                if store.isSelectMode {
+                    store.cancelSelectMode()
+                    return nil
+                }
+                return event
             default:
                 break
             }

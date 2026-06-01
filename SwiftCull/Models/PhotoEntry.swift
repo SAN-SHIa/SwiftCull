@@ -362,18 +362,19 @@ struct PhotoEntry: Identifiable, Hashable, Sendable {
         formattedCaptureDate
     }
 
+    private static let displayDateFormatter: DateFormatter = {
+        let f = DateFormatter()
+        f.dateStyle = .medium
+        f.timeStyle = .short
+        return f
+    }()
+
     var formattedCaptureDate: String {
-        let formatter = DateFormatter()
-        formatter.dateStyle = .medium
-        formatter.timeStyle = .short
-        return formatter.string(from: fileDate)
+        Self.displayDateFormatter.string(from: fileDate)
     }
 
     var formattedModificationDate: String {
-        let formatter = DateFormatter()
-        formatter.dateStyle = .medium
-        formatter.timeStyle = .short
-        return formatter.string(from: modificationDate)
+        Self.displayDateFormatter.string(from: modificationDate)
     }
 
     var exifInfo: PhotoExifInfo {
@@ -391,7 +392,9 @@ struct PhotoEntry: Identifiable, Hashable, Sendable {
     var fileTypeDescription: String {
         var types: [String] = []
         if hasJpg { types.append("JPG") }
-        if hasNef { types.append("NEF") }
+        if let nefPath = nefPath {
+            types.append((nefPath as NSString).pathExtension.uppercased())
+        }
         if hasMov { types.append("MOV") }
         return types.joined(separator: " + ")
     }
