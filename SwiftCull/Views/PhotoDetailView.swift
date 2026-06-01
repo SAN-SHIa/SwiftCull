@@ -285,27 +285,38 @@ struct PhotoDetailView: View {
     private func actionSection(_ photo: PhotoEntry) -> some View {
         DetailCard(title: "操作", systemImage: "slider.horizontal.3") {
             VStack(spacing: 6) {
-                if photo.hasJpg {
+                let activePhotos: [PhotoEntry] = {
+                    if store.selectedPhotos.count > 1 {
+                        return store.selectedPhotoEntries
+                    }
+                    return [photo]
+                }()
+
+                let jpgFiles = activePhotos.compactMap(\.jpgPath).map { URL(fileURLWithPath: $0) }
+                let rawFiles = activePhotos.compactMap(\.nefPath).map { URL(fileURLWithPath: $0) }
+                let movFiles = activePhotos.compactMap(\.movPath).map { URL(fileURLWithPath: $0) }
+
+                if !jpgFiles.isEmpty {
                     Button {
-                        NSWorkspace.shared.selectFile(photo.jpgPath, inFileViewerRootedAtPath: "")
+                        NSWorkspace.shared.activateFileViewerSelecting(jpgFiles)
                     } label: {
                         actionLabel("在 Finder 中显示 JPG", systemImage: "folder")
                     }
                     .buttonStyle(InspectorActionButtonStyle())
                 }
 
-                if photo.hasNef {
+                if !rawFiles.isEmpty {
                     Button {
-                        NSWorkspace.shared.selectFile(photo.nefPath, inFileViewerRootedAtPath: "")
+                        NSWorkspace.shared.activateFileViewerSelecting(rawFiles)
                     } label: {
-                        actionLabel("在 Finder 中显示 NEF", systemImage: "folder")
+                        actionLabel("在 Finder 中显示 RAW", systemImage: "folder")
                     }
                     .buttonStyle(InspectorActionButtonStyle())
                 }
 
-                if photo.hasMov {
+                if !movFiles.isEmpty {
                     Button {
-                        NSWorkspace.shared.selectFile(photo.movPath, inFileViewerRootedAtPath: "")
+                        NSWorkspace.shared.activateFileViewerSelecting(movFiles)
                     } label: {
                         actionLabel("在 Finder 中显示 MOV", systemImage: "folder")
                     }
@@ -313,9 +324,14 @@ struct PhotoDetailView: View {
                 }
 
                 Button(role: .destructive) {
-                    store.requestDelete(photo)
+                    if store.selectedPhotos.count > 1 {
+                        store.requestDeleteSelected()
+                    } else {
+                        store.requestDelete(photo)
+                    }
                 } label: {
-                    actionLabel("移至废纸篓 (所有格式)", systemImage: "trash")
+                    let count = store.selectedPhotos.count
+                    actionLabel(count > 1 ? "移至废纸篓 (\(count) 张)" : "移至废纸篓 (所有格式)", systemImage: "trash")
                 }
                 .buttonStyle(InspectorActionButtonStyle(isDestructive: true))
             }
@@ -473,13 +489,26 @@ struct InspectorActionButtonStyle: ButtonStyle {
 struct FlowLayout: Layout {
     var spacing: CGFloat = 4
 
-    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
+    typealias Cache = (size: CGSize, positions: [CGPoint])
+
+    func makeCache(subviews: Subviews) -> Cache {
+        (CGSize.zero, [])
+    }
+
+    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout Cache) -> CGSize {
         let result = arrange(proposal: proposal, subviews: subviews)
+        cache = result
         return result.size
     }
 
-    func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
-        let result = arrange(proposal: proposal, subviews: subviews)
+    func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout Cache) {
+        let result: Cache
+        if cache.positions.count == subviews.count {
+            result = cache
+        } else {
+            result = arrange(proposal: proposal, subviews: subviews)
+            cache = result
+        }
         for (index, position) in result.positions.enumerated() {
             subviews[index].place(at: CGPoint(x: bounds.minX + position.x, y: bounds.minY + position.y), proposal: .unspecified)
         }

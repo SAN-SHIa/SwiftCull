@@ -149,27 +149,42 @@ struct DetailThumbnailView: View {
 
     private func loadDetailImage() {
         loadTask?.cancel()
-        let service = ThumbnailService.shared
         let path = photo.primaryImagePath.isEmpty ? (photo.movPath ?? "") : photo.primaryImagePath
-        guard !path.isEmpty else {
-            return
-        }
-
-        let requestCacheId = cacheId
-        if let cached = service.getCached(cacheId) {
-            self.image = cached
-            return
-        }
+        guard !path.isEmpty else { return }
 
         let requestPath = path
-        let requestSize = targetSize
+        let isVideo = photo.isVideoOnly
         loadTask = Task {
-            let newImage = await service.thumbnail(path: requestPath, id: requestCacheId, size: requestSize)
+            let image: NSImage? = await Task.detached(priority: .userInitiated) {
+                if isVideo {
+                    let service = ThumbnailService.shared
+                    return await service.thumbnail(path: requestPath, id: "detail|\(requestPath)", size: 800)
+                }
+                let url = URL(fileURLWithPath: requestPath)
+                guard let source = CGImageSourceCreateWithURL(url as CFURL, nil) else { return nil }
+
+                // Read original dimensions to request full-size thumbnail
+                let properties = CGImageSourceCopyPropertiesAtIndex(source, 0, nil) as? [CFString: Any]
+                let origW = properties?[kCGImagePropertyPixelWidth] as? CGFloat ?? 6000
+                let origH = properties?[kCGImagePropertyPixelHeight] as? CGFloat ?? 4000
+                let maxDim = max(origW, origH)
+
+                let options: [CFString: Any] = [
+                    kCGImageSourceThumbnailMaxPixelSize: maxDim,
+                    kCGImageSourceCreateThumbnailFromImageAlways: true,
+                    kCGImageSourceCreateThumbnailWithTransform: true,
+                    kCGImageSourceShouldCache: false,
+                    kCGImageSourceShouldCacheImmediately: true
+                ]
+                guard let cgImage = CGImageSourceCreateThumbnailAtIndex(source, 0, options as CFDictionary) else { return nil }
+                return NSImage(cgImage: cgImage, size: NSSize(width: cgImage.width, height: cgImage.height))
+            }.value
+
             guard !Task.isCancelled else { return }
             await MainActor.run {
-                guard cacheId == requestCacheId else { return }
-                self.image = newImage
+                self.image = image
             }
         }
     }
 }
+

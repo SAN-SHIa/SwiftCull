@@ -15,7 +15,7 @@ enum RatingFilter: Int, CaseIterable, Identifiable, Sendable {
         switch self {
         case .all: return "全部"
         case .unrated: return "未评分"
-        default: return String(repeating: "★", count: rawValue)
+        default: return "\(rawValue)★"
         }
     }
 }

@@ -8,13 +8,26 @@ final class FileService: @unchecked Sendable {
 
     func scanDirectory(at path: String) async -> [PhotoEntry] {
         await Task.detached(priority: .userInitiated) {
-            Self.scanDirectorySync(at: path)
+            await Self.scanDirectorySync(at: path)
         }.value
     }
 
-    private static func scanDirectorySync(at path: String) -> [PhotoEntry] {
+    private static let exifDateFormatter: DateFormatter = {
+        let f = DateFormatter()
+        f.locale = Locale(identifier: "en_US_POSIX")
+        f.timeZone = .current
+        return f
+    }()
+
+    private static let displayDateFormatter: DateFormatter = {
+        let f = DateFormatter()
+        f.dateStyle = .medium
+        f.timeStyle = .short
+        return f
+    }()
+
+    private static func scanDirectorySync(at path: String) async -> [PhotoEntry] {
         let fileManager = FileManager.default
-        var entries: [PhotoEntry] = []
 
         let fileURLs: [URL]
         do {
@@ -28,54 +41,106 @@ final class FileService: @unchecked Sendable {
             return []
         }
 
-        var photoDict: [String: PhotoFileGroup] = [:]
-
-        let imageExtensions: Set<String> = ["jpg", "jpeg", "nef", "cr2", "arw", "dng", "tiff", "tif"]
+        let imageExtensions: Set<String> = ["jpg", "jpeg", "nef", "cr2", "arw", "dng", "raf", "tiff", "tif"]
         let videoExtensions: Set<String> = ["mov", "mp4", "avi"]
+        let metadataExtensions: Set<String> = ["jpg", "jpeg", "nef", "cr2", "arw", "dng", "raf", "tiff", "tif"]
+
+        // Phase 1: Fast scan - collect file info using resource values only
+        struct FileEntry {
+            let baseName: String
+            let ext: String
+            let path: String
+            let fileSize: Int64?
+            let creationDate: Date?
+            let modDate: Date?
+        }
+
+        var fileEntries: [FileEntry] = []
+        fileEntries.reserveCapacity(fileURLs.count)
 
         for fileURL in fileURLs {
             let ext = fileURL.pathExtension.lowercased()
             guard imageExtensions.contains(ext) || videoExtensions.contains(ext) else { continue }
 
-            let resourceValues = try? fileURL.resourceValues(forKeys: [.isRegularFileKey, .fileSizeKey, .creationDateKey, .contentModificationDateKey])
-            if resourceValues?.isRegularFile == false { continue }
+            guard let rv = try? fileURL.resourceValues(forKeys: [.isRegularFileKey, .fileSizeKey, .creationDateKey, .contentModificationDateKey]),
+                  rv.isRegularFile != false else { continue }
 
-            let baseName = fileURL.deletingPathExtension().lastPathComponent
-            let fullPath = fileURL.path
-            let fileSize = resourceValues?.fileSize.map { Int64($0) }
-            let modDate = resourceValues?.contentModificationDate
-            let captureDate = readCaptureDate(from: fileURL, fileExtension: ext) ?? resourceValues?.creationDate ?? modDate
+            fileEntries.append(FileEntry(
+                baseName: fileURL.deletingPathExtension().lastPathComponent,
+                ext: ext,
+                path: fileURL.path,
+                fileSize: rv.fileSize.map { Int64($0) },
+                creationDate: rv.creationDate,
+                modDate: rv.contentModificationDate
+            ))
+        }
 
-            if photoDict[baseName] == nil {
-                photoDict[baseName] = PhotoFileGroup()
+        // Phase 2: Parallel EXIF reading for image files only
+        struct ExifResult: Sendable {
+            let index: Int
+            let date: Date?
+        }
+
+        let imageIndices = fileEntries.indices.filter { metadataExtensions.contains(fileEntries[$0].ext) }
+        let entriesForExif = imageIndices.map { fileEntries[$0] }
+
+        var exifDates: [Int: Date?] = [:]
+        exifDates.reserveCapacity(imageIndices.count)
+
+        await withTaskGroup(of: ExifResult.self) { group in
+            for (iteration, fileEntry) in entriesForExif.enumerated() {
+                let path = fileEntry.path
+                let ext = fileEntry.ext
+                let originalIndex = imageIndices[iteration]
+                group.addTask(priority: .userInitiated) {
+                    let date = readCaptureDate(from: path, fileExtension: ext)
+                    return ExifResult(index: originalIndex, date: date)
+                }
+            }
+            for await result in group {
+                exifDates[result.index] = result.date
+            }
+        }
+
+        // Phase 3: Build photo dictionary
+        var photoDict: [String: PhotoFileGroup] = [:]
+
+        for (index, entry) in fileEntries.enumerated() {
+            let captureDate = exifDates[index] ?? nil ?? entry.creationDate ?? entry.modDate
+
+            if photoDict[entry.baseName] == nil {
+                photoDict[entry.baseName] = PhotoFileGroup()
             }
 
-            var entry = photoDict[baseName]!
+            var group = photoDict[entry.baseName]!
 
-            switch ext {
+            switch entry.ext {
             case "jpg", "jpeg":
-                entry.jpgPath = fullPath
-                entry.jpgSize = fileSize
-                entry.updateCaptureDate(captureDate, priority: 3)
-            case "nef", "cr2", "arw", "dng":
-                entry.nefPath = fullPath
-                entry.nefSize = fileSize
-                entry.updateCaptureDate(captureDate, priority: 2)
+                group.jpgPath = entry.path
+                group.jpgSize = entry.fileSize
+                group.updateCaptureDate(captureDate, priority: 3)
+            case "nef", "cr2", "arw", "dng", "raf":
+                group.nefPath = entry.path
+                group.nefSize = entry.fileSize
+                group.updateCaptureDate(captureDate, priority: 2)
             case "tiff", "tif":
-                entry.jpgPath = fullPath
-                entry.jpgSize = fileSize
-                entry.updateCaptureDate(captureDate, priority: 3)
+                group.jpgPath = entry.path
+                group.jpgSize = entry.fileSize
+                group.updateCaptureDate(captureDate, priority: 3)
             case "mov", "mp4", "avi":
-                entry.movPath = fullPath
-                entry.movSize = fileSize
-                entry.updateCaptureDate(captureDate, priority: 1)
+                group.movPath = entry.path
+                group.movSize = entry.fileSize
+                group.updateCaptureDate(captureDate, priority: 1)
             default:
                 break
             }
 
-            entry.updateModificationDate(modDate)
-            photoDict[baseName] = entry
+            group.updateModificationDate(entry.modDate)
+            photoDict[entry.baseName] = group
         }
+
+        var entries: [PhotoEntry] = []
+        entries.reserveCapacity(photoDict.count)
 
         for (baseName, data) in photoDict {
             guard data.jpgPath != nil || data.nefPath != nil || data.movPath != nil else { continue }
@@ -165,10 +230,9 @@ final class FileService: @unchecked Sendable {
         }
     }
 
-    private static func readCaptureDate(from fileURL: URL, fileExtension: String) -> Date? {
-        let metadataExtensions: Set<String> = ["jpg", "jpeg", "nef", "cr2", "arw", "dng", "tiff", "tif"]
-        guard metadataExtensions.contains(fileExtension),
-              let source = CGImageSourceCreateWithURL(fileURL as CFURL, nil),
+    private static func readCaptureDate(from path: String, fileExtension: String) -> Date? {
+        let url = URL(fileURLWithPath: path)
+        guard let source = CGImageSourceCreateWithURL(url as CFURL, nil),
               let properties = CGImageSourceCopyPropertiesAtIndex(source, 0, nil) as? [CFString: Any] else {
             return nil
         }
@@ -187,9 +251,7 @@ final class FileService: @unchecked Sendable {
             return nil
         }
 
-        let formatter = DateFormatter()
-        formatter.locale = Locale(identifier: "en_US_POSIX")
-        formatter.timeZone = .current
+        let formatter = exifDateFormatter
 
         for format in ["yyyy:MM:dd HH:mm:ss", "yyyy-MM-dd HH:mm:ss", "yyyy-MM-dd'T'HH:mm:ssXXXXX"] {
             formatter.dateFormat = format

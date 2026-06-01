@@ -40,6 +40,7 @@ class PhotoStore: ObservableObject {
     @Published var viewMode: PhotoViewMode = .grid
     @Published var isSidebarVisible = true
     @Published var showingShortcutGuide = false
+    @Published var isSelectMode = false
     @Published var detectedVolumes: [DetectedVolume] = []
 
     private let fileService = FileService.shared
@@ -56,6 +57,24 @@ class PhotoStore: ObservableObject {
         finderTagService.tagColorLookup
     }
 
+    private func buildPhotoIndexMap() -> [String: Int] {
+        var map: [String: Int] = [:]
+        map.reserveCapacity(photos.count)
+        for index in photos.indices {
+            map[photos[index].id] = index
+        }
+        return map
+    }
+
+    private func buildFilteredIndexMap() -> [String: Int] {
+        var map: [String: Int] = [:]
+        map.reserveCapacity(filteredPhotos.count)
+        for index in filteredPhotos.indices {
+            map[filteredPhotos[index].id] = index
+        }
+        return map
+    }
+
     var photoCount: Int { filteredPhotos.count }
     var totalPhotoCount: Int { photos.count }
 
@@ -65,7 +84,8 @@ class PhotoStore: ObservableObject {
     }
 
     var selectedPhotoEntries: [PhotoEntry] {
-        filteredPhotos.filter { selectedPhotos.contains($0.id) }
+        guard !selectedPhotos.isEmpty else { return [] }
+        return filteredPhotos.filter { selectedPhotos.contains($0.id) }
     }
 
     var selectedCount: Int { selectedPhotos.count }
@@ -79,6 +99,8 @@ class PhotoStore: ObservableObject {
         currentLoadID = loadID
         lastPreheatKey = nil
         thumbnailService.cancelPending()
+        thumbnailService.clearInMemoryCache()
+        thumbnailService.cleanupDiskCache()
         isLoading = true
         loadingProgress = 0
         loadingStatus = "准备读取文件夹..."
@@ -124,26 +146,40 @@ class PhotoStore: ObservableObject {
             loadingProgress = 0.2
 
             let chunkSize = 200
-            for startIndex in stride(from: 0, to: loaded.count, by: chunkSize) {
-                let endIndex = min(startIndex + chunkSize, loaded.count)
-                let chunk = Array(loaded[startIndex..<endIndex])
+            let chunkCount = (loaded.count + chunkSize - 1) / chunkSize
+            var chunkResults = Array<[PhotoEntry]?>(repeating: nil, count: chunkCount)
+            var completedCount = 0
 
-                let partial = await Task.detached(priority: .userInitiated) {
-                    let ratingService = RatingService.shared
-                    let tagService = TagService.shared
-                    return chunk.map { entry in
-                        var photo = entry
-                        photo.rating = ratingService.getRating(for: photo.id)
-                        photo.tags = tagService.getTagsForPhotoPair(photo)
-                        return photo
+            await withTaskGroup(of: (Int, [PhotoEntry]).self) { group in
+                for chunkIndex in 0..<chunkCount {
+                    let startIndex = chunkIndex * chunkSize
+                    let endIndex = min(startIndex + chunkSize, loaded.count)
+                    let chunk = Array(loaded[startIndex..<endIndex])
+
+                    group.addTask(priority: .userInitiated) {
+                        let ratingService = RatingService.shared
+                        let tagService = TagService.shared
+                        let partial = chunk.map { entry -> PhotoEntry in
+                            var photo = entry
+                            photo.rating = ratingService.getRating(for: photo.id)
+                            photo.tags = tagService.getTagsForPhotoPair(photo)
+                            return photo
+                        }
+                        return (chunkIndex, partial)
                     }
-                }.value
+                }
 
-                guard currentLoadID == loadID else { return }
+                for await (chunkIndex, partial) in group {
+                    guard currentLoadID == loadID else { return }
+                    chunkResults[chunkIndex] = partial
+                    completedCount += 1
+                    loadingProgress = 0.2 + 0.65 * (Double(completedCount) / Double(chunkCount))
+                    loadingStatus = "正在读取评分与 Finder 标签 \(min(completedCount * chunkSize, loaded.count))/\(loaded.count)"
+                }
+            }
 
-                enriched.append(contentsOf: partial)
-                loadingProgress = 0.2 + 0.65 * (Double(enriched.count) / Double(loaded.count))
-                loadingStatus = "正在读取评分与 Finder 标签 \(enriched.count)/\(loaded.count)"
+            for chunk in chunkResults {
+                if let chunk { enriched.append(contentsOf: chunk) }
             }
         }
 
@@ -175,47 +211,41 @@ class PhotoStore: ObservableObject {
     }
 
     func applyFilters() {
-        var result = photos.filter { !$0.isDeleted }
-
         let trimmedQuery = filterOptions.searchText.trimmingCharacters(in: .whitespacesAndNewlines)
-        if !trimmedQuery.isEmpty {
-            let query = trimmedQuery.lowercased()
-            result = result.filter { photo in
-                photo.baseName.lowercased().contains(query)
+        let query = trimmedQuery.isEmpty ? nil : trimmedQuery.lowercased()
+        let ratingFilter = filterOptions.ratingFilter
+        let fileTypeFilter = filterOptions.fileTypeFilter
+        let tagFilter = filterOptions.tagFilter
+
+        var result = [PhotoEntry]()
+        result.reserveCapacity(photos.count)
+
+        for photo in photos {
+            if photo.isDeleted { continue }
+
+            if let query, !photo.baseName.lowercased().contains(query) { continue }
+
+            switch ratingFilter {
+            case .all: break
+            case .unrated: if photo.rating != 0 { continue }
+            default: if photo.rating != ratingFilter.rawValue { continue }
             }
+
+            switch fileTypeFilter {
+            case .all: break
+            case .jpgOnly: if !(photo.hasJpg && !photo.hasNef && !photo.hasMov) { continue }
+            case .nefOnly: if !(photo.hasNef && !photo.hasJpg && !photo.hasMov) { continue }
+            case .jpgAndNef: if !(photo.hasJpg && photo.hasNef) { continue }
+            case .movOnly: if !photo.isVideoOnly { continue }
+            case .hasMov: if !photo.hasMov { continue }
+            }
+
+            if let tagFilter, !photo.tags.contains(tagFilter) { continue }
+
+            result.append(photo)
         }
 
-        switch filterOptions.ratingFilter {
-        case .all:
-            break
-        case .unrated:
-            result = result.filter { $0.rating == 0 }
-        default:
-            result = result.filter { $0.rating == filterOptions.ratingFilter.rawValue }
-        }
-
-        switch filterOptions.fileTypeFilter {
-        case .all:
-            break
-        case .jpgOnly:
-            result = result.filter { $0.hasJpg && !$0.hasNef && !$0.hasMov }
-        case .nefOnly:
-            result = result.filter { $0.hasNef && !$0.hasJpg && !$0.hasMov }
-        case .jpgAndNef:
-            result = result.filter { $0.hasJpg && $0.hasNef }
-        case .movOnly:
-            result = result.filter { $0.isVideoOnly }
-        case .hasMov:
-            result = result.filter { $0.hasMov }
-        }
-
-        if let tagFilter = filterOptions.tagFilter {
-            result = result.filter { $0.tags.contains(tagFilter) }
-        }
-
-        result = sortPhotos(result)
-
-        filteredPhotos = result
+        filteredPhotos = sortPhotos(result)
     }
 
     private func sortPhotos(_ photos: [PhotoEntry]) -> [PhotoEntry] {
@@ -290,11 +320,14 @@ class PhotoStore: ObservableObject {
         let ids = activePhotoIds
         guard !ids.isEmpty else { return }
 
+        let photoMap = buildPhotoIndexMap()
+        let filteredMap = buildFilteredIndexMap()
+
         for id in ids {
-            if let index = photos.firstIndex(where: { $0.id == id }) {
+            if let index = photoMap[id] {
                 photos[index].workflowMark = mark
             }
-            if let filteredIndex = filteredPhotos.firstIndex(where: { $0.id == id }) {
+            if let filteredIndex = filteredMap[id] {
                 filteredPhotos[filteredIndex].workflowMark = mark
             }
         }
@@ -306,20 +339,26 @@ class PhotoStore: ObservableObject {
     private func toggleActiveMark(_ mark: PhotoWorkflowMark) {
         let ids = activePhotoIds
         guard !ids.isEmpty else { return }
+        let photoMap = buildPhotoIndexMap()
+        let filteredMap = buildFilteredIndexMap()
         let shouldClear = ids.allSatisfy { id in
-            filteredPhotos.first { $0.id == id }?.workflowMark == mark ||
-            photos.first { $0.id == id }?.workflowMark == mark
+            if let fi = filteredMap[id], filteredPhotos[fi].workflowMark == mark { return true }
+            if let pi = photoMap[id], photos[pi].workflowMark == mark { return true }
+            return false
         }
         markActivePhotos(shouldClear ? .none : mark)
     }
 
     func batchSetRating(_ rating: Int) {
+        let photoMap = buildPhotoIndexMap()
+        let filteredMap = buildFilteredIndexMap()
+
         for photoId in selectedPhotos {
-            if let index = photos.firstIndex(where: { $0.id == photoId }) {
+            if let index = photoMap[photoId] {
                 ratingService.setRating(rating, for: photoId)
                 photos[index].rating = rating
             }
-            if let filteredIndex = filteredPhotos.firstIndex(where: { $0.id == photoId }) {
+            if let filteredIndex = filteredMap[photoId] {
                 filteredPhotos[filteredIndex].rating = rating
             }
         }
@@ -334,8 +373,11 @@ class PhotoStore: ObservableObject {
     }
 
     func batchAddTag(_ tag: String) {
+        let photoMap = buildPhotoIndexMap()
+        let filteredMap = buildFilteredIndexMap()
+
         for photoId in selectedPhotos {
-            if let index = photos.firstIndex(where: { $0.id == photoId }) {
+            if let index = photoMap[photoId] {
                 var tags = photos[index].tags
                 if !tags.contains(tag) {
                     tags.append(tag)
@@ -343,7 +385,7 @@ class PhotoStore: ObservableObject {
                     photos[index].tags = tags
                 }
             }
-            if let filteredIndex = filteredPhotos.firstIndex(where: { $0.id == photoId }) {
+            if let filteredIndex = filteredMap[photoId] {
                 var tags = filteredPhotos[filteredIndex].tags
                 if !tags.contains(tag) {
                     tags.append(tag)
@@ -360,12 +402,15 @@ class PhotoStore: ObservableObject {
     }
 
     func batchClearTags() {
+        let photoMap = buildPhotoIndexMap()
+        let filteredMap = buildFilteredIndexMap()
+
         for photoId in selectedPhotos {
-            if let index = photos.firstIndex(where: { $0.id == photoId }) {
+            if let index = photoMap[photoId] {
                 _ = tagService.setTagsForPhotoPair([], photo: photos[index])
                 photos[index].tags = []
             }
-            if let filteredIndex = filteredPhotos.firstIndex(where: { $0.id == photoId }) {
+            if let filteredIndex = filteredMap[photoId] {
                 filteredPhotos[filteredIndex].tags = []
             }
         }
@@ -409,18 +454,28 @@ class PhotoStore: ObservableObject {
         selectModeSnapshot = photos.map {
             PhotoSnapshot(photoId: $0.id, rating: $0.rating, tags: $0.tags, workflowMark: $0.workflowMark)
         }
+        isSelectMode = true
+    }
+
+    func exitSelectMode() {
+        if isSelectMode {
+            confirmSelectMode()
+        }
     }
 
     func cancelSelectMode() {
+        let photoMap = buildPhotoIndexMap()
+        let filteredMap = buildFilteredIndexMap()
+
         for snapshot in selectModeSnapshot {
-            if let index = photos.firstIndex(where: { $0.id == snapshot.photoId }) {
+            if let index = photoMap[snapshot.photoId] {
                 ratingService.setRating(snapshot.rating, for: snapshot.photoId)
                 photos[index].rating = snapshot.rating
                 _ = tagService.setTagsForPhotoPair(snapshot.tags, photo: photos[index], colorLookup: tagColorLookup)
                 photos[index].tags = snapshot.tags
                 photos[index].workflowMark = snapshot.workflowMark
             }
-            if let filteredIndex = filteredPhotos.firstIndex(where: { $0.id == snapshot.photoId }) {
+            if let filteredIndex = filteredMap[snapshot.photoId] {
                 filteredPhotos[filteredIndex].rating = snapshot.rating
                 filteredPhotos[filteredIndex].tags = snapshot.tags
                 filteredPhotos[filteredIndex].workflowMark = snapshot.workflowMark
@@ -429,12 +484,14 @@ class PhotoStore: ObservableObject {
         selectModeSnapshot = []
         selectedPhotos = []
         selectedPhoto = nil
+        isSelectMode = false
     }
 
     func confirmSelectMode() {
         selectModeSnapshot = []
         selectedPhotos = []
         selectedPhoto = nil
+        isSelectMode = false
     }
 
     func selectPhoto(_ photo: PhotoEntry?) {
@@ -474,7 +531,13 @@ class PhotoStore: ObservableObject {
     }
 
     func selectAll() {
+        if !isSelectMode {
+            enterSelectMode()
+        }
         selectedPhotos = Set(filteredPhotos.map { $0.id })
+        if let first = filteredPhotos.first {
+            selectedPhoto = first
+        }
     }
 
     func selectPhotoIds(_ ids: Set<String>) {
@@ -540,14 +603,19 @@ class PhotoStore: ObservableObject {
             deleteIds: requestedDeleteIds,
             in: previousFilteredPhotos
         )
-        var deletedIds: Set<String> = []
 
+        // Build lookup dict for O(1) index access
+        var photoIndexByID: [String: Int] = [:]
+        for index in photos.indices {
+            photoIndexByID[photos[index].id] = index
+        }
+
+        // Mark as deleted immediately for instant UI update
+        var deletedIds: Set<String> = []
         for photo in deleteRequest {
-            if fileService.movePhotoToTrash(photo) {
-                if let index = photos.firstIndex(where: { $0.id == photo.id }) {
-                    photos[index].isDeleted = true
-                    deletedIds.insert(photo.id)
-                }
+            if let index = photoIndexByID[photo.id] {
+                photos[index].isDeleted = true
+                deletedIds.insert(photo.id)
             }
         }
 
@@ -558,6 +626,15 @@ class PhotoStore: ObservableObject {
 
         applyFilters()
         selectPhotoAfterDeletion(anchorIndex: selectionAnchorIndex)
+
+        // Perform actual file I/O on background thread
+        let fileServiceRef = self.fileService
+        let photosToTrash = deleteRequest.filter { deletedIds.contains($0.id) }
+        Task.detached(priority: .utility) {
+            for photo in photosToTrash {
+                _ = fileServiceRef.movePhotoToTrash(photo)
+            }
+        }
     }
 
     private func deletionSelectionAnchorIndex(deleteIds: Set<String>, in photos: [PhotoEntry]) -> Int {

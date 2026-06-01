@@ -15,12 +15,14 @@ final class ThumbnailService: @unchecked Sendable {
     private let cache = NSCache<NSString, NSImage>()
     private let workQueue = DispatchQueue(label: "com.swiftcull.thumbnail.work", qos: .userInitiated, attributes: .concurrent)
     private let stateQueue = DispatchQueue(label: "com.swiftcull.thumbnail.state")
-    private let generationSemaphore = DispatchSemaphore(value: 4)
+    private let generationSemaphore = DispatchSemaphore(value: 8)
     private var inProgress: [String: PendingRequest] = [:]
     private var generation = 0
 
     private let diskCacheDir: URL
     private let fileManager = FileManager.default
+
+    private static let maxDiskCacheBytes: Int64 = 500 * 1024 * 1024
 
     private init() {
         cache.countLimit = 800
@@ -88,6 +90,47 @@ final class ThumbnailService: @unchecked Sendable {
         cache.removeAllObjects()
         try? fileManager.removeItem(at: diskCacheDir)
         try? fileManager.createDirectory(at: diskCacheDir, withIntermediateDirectories: true)
+    }
+
+    func clearInMemoryCache() {
+        cache.removeAllObjects()
+    }
+
+    func cleanupDiskCache() {
+        workQueue.async { [weak self] in
+            self?.performDiskCacheCleanup()
+        }
+    }
+
+    private func performDiskCacheCleanup() {
+        guard let files = try? fileManager.contentsOfDirectory(
+            at: diskCacheDir,
+            includingPropertiesForKeys: [.fileSizeKey, .contentModificationDateKey],
+            options: []
+        ) else { return }
+
+        var totalSize: Int64 = 0
+        var fileInfos: [(url: URL, size: Int64, date: Date)] = []
+
+        for file in files {
+            guard file.pathExtension == "jpg" else { continue }
+            let resources = try? file.resourceValues(forKeys: [.fileSizeKey, .contentModificationDateKey])
+            let size = Int64(resources?.fileSize ?? 0)
+            let date = resources?.contentModificationDate ?? Date.distantPast
+            totalSize += size
+            fileInfos.append((url: file, size: size, date: date))
+        }
+
+        guard totalSize > Self.maxDiskCacheBytes else { return }
+
+        fileInfos.sort { $0.date < $1.date }
+
+        var remaining = totalSize
+        for info in fileInfos {
+            guard remaining > Self.maxDiskCacheBytes else { break }
+            try? fileManager.removeItem(at: info.url)
+            remaining -= info.size
+        }
     }
 
     func preloadThumbnails(paths: [(id: String, path: String)], size: CGFloat) {
@@ -176,19 +219,30 @@ final class ThumbnailService: @unchecked Sendable {
     }
 
     private func saveToDiskCache(image: NSImage, id: String) {
-        guard let tiffData = image.tiffRepresentation,
-              let bitmap = NSBitmapImageRep(data: tiffData),
-              let data = bitmap.representation(using: .jpeg, properties: [.compressionFactor: 0.82]) else { return }
-
-        try? data.write(to: cacheFileURL(for: id), options: .atomic)
+        guard let cgImage = image.cgImage(forProposedRect: nil, context: nil, hints: nil) else { return }
+        let url = cacheFileURL(for: id)
+        guard let dest = CGImageDestinationCreateWithURL(url as CFURL, "public.jpeg" as CFString, 1, nil) else { return }
+        let options: [CFString: Any] = [
+            kCGImageDestinationLossyCompressionQuality: 0.82
+        ]
+        CGImageDestinationAddImage(dest, cgImage, options as CFDictionary)
+        CGImageDestinationFinalize(dest)
     }
 
     private func cacheFileURL(for id: String) -> URL {
         let digest = SHA256.hash(data: Data(id.utf8))
-            .map { String(format: "%02x", $0) }
-            .joined()
-        return diskCacheDir.appendingPathComponent("\(digest).jpg")
+        var name = ""
+        name.reserveCapacity(64)
+        for byte in digest {
+            let hi = Int(byte >> 4)
+            let lo = Int(byte & 0x0F)
+            name.append(Self.hexLookup[hi])
+            name.append(Self.hexLookup[lo])
+        }
+        return diskCacheDir.appendingPathComponent("\(name).jpg")
     }
+
+    private static let hexLookup: [Character] = Array("0123456789abcdef")
 
     private static func cost(for image: NSImage) -> Int {
         if let representation = image.representations.first {
@@ -210,7 +264,7 @@ final class ThumbnailService: @unchecked Sendable {
         let pixelSize = max(64, Int(maxSize * 2.0))
         let options: [CFString: Any] = [
             kCGImageSourceThumbnailMaxPixelSize: pixelSize,
-            kCGImageSourceCreateThumbnailFromImageAlways: true,
+            kCGImageSourceCreateThumbnailFromImageIfAbsent: true,
             kCGImageSourceCreateThumbnailWithTransform: true,
             kCGImageSourceShouldCache: false,
             kCGImageSourceShouldCacheImmediately: true
