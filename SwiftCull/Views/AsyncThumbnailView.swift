@@ -103,7 +103,6 @@ struct DetailThumbnailView: View {
     let photo: PhotoEntry
     var targetSize: CGFloat = 1000
     @State private var image: NSImage?
-    @State private var loadTask: Task<Void, Never>?
 
     private var cacheId: String {
         "detail|\(photo.primaryFilePath)|\(Int(targetSize.rounded()))"
@@ -133,58 +132,56 @@ struct DetailThumbnailView: View {
             }
         }
         .frame(maxWidth: .infinity)
-        .onAppear {
-            loadDetailImage()
-        }
-        .onDisappear {
-            loadTask?.cancel()
-            loadTask = nil
-        }
-        .onChange(of: photo.primaryFilePath) { _, _ in
-            loadTask?.cancel()
-            image = nil
-            loadDetailImage()
+        .id(photo.primaryFilePath)
+        .task(id: photo.primaryFilePath) {
+            await loadDetailImage()
         }
     }
 
-    private func loadDetailImage() {
-        loadTask?.cancel()
+    private func loadDetailImage() async {
         let path = photo.primaryImagePath.isEmpty ? (photo.movPath ?? "") : photo.primaryImagePath
         guard !path.isEmpty else { return }
 
         let requestPath = path
         let isVideo = photo.isVideoOnly
-        loadTask = Task {
-            let image: NSImage? = await Task.detached(priority: .userInitiated) {
-                if isVideo {
-                    let service = ThumbnailService.shared
-                    return await service.thumbnail(path: requestPath, id: "detail|\(requestPath)", size: 800)
+        let loaded: NSImage? = await Task.detached(priority: .userInitiated) {
+            if isVideo {
+                let service = ThumbnailService.shared
+                // Add timeout for video thumbnails to prevent UI hang
+                return await withTaskGroup(of: NSImage?.self, returning: NSImage?.self) { group in
+                    group.addTask {
+                        await service.thumbnail(path: requestPath, id: "detail|\(requestPath)", size: 800)
+                    }
+                    group.addTask {
+                        try? await Task.sleep(for: .seconds(8))
+                        return nil
+                    }
+                    let result = await group.next()
+                    group.cancelAll()
+                    return result ?? nil
                 }
-                let url = URL(fileURLWithPath: requestPath)
-                guard let source = CGImageSourceCreateWithURL(url as CFURL, nil) else { return nil }
-
-                // Read original dimensions to request full-size thumbnail
-                let properties = CGImageSourceCopyPropertiesAtIndex(source, 0, nil) as? [CFString: Any]
-                let origW = properties?[kCGImagePropertyPixelWidth] as? CGFloat ?? 6000
-                let origH = properties?[kCGImagePropertyPixelHeight] as? CGFloat ?? 4000
-                let maxDim = max(origW, origH)
-
-                let options: [CFString: Any] = [
-                    kCGImageSourceThumbnailMaxPixelSize: maxDim,
-                    kCGImageSourceCreateThumbnailFromImageAlways: true,
-                    kCGImageSourceCreateThumbnailWithTransform: true,
-                    kCGImageSourceShouldCache: false,
-                    kCGImageSourceShouldCacheImmediately: true
-                ]
-                guard let cgImage = CGImageSourceCreateThumbnailAtIndex(source, 0, options as CFDictionary) else { return nil }
-                return NSImage(cgImage: cgImage, size: NSSize(width: cgImage.width, height: cgImage.height))
-            }.value
-
-            guard !Task.isCancelled else { return }
-            await MainActor.run {
-                self.image = image
             }
-        }
+            let url = URL(fileURLWithPath: requestPath)
+            guard let source = CGImageSourceCreateWithURL(url as CFURL, nil) else { return nil }
+
+            let properties = CGImageSourceCopyPropertiesAtIndex(source, 0, nil) as? [CFString: Any]
+            let origW = properties?[kCGImagePropertyPixelWidth] as? CGFloat ?? 6000
+            let origH = properties?[kCGImagePropertyPixelHeight] as? CGFloat ?? 4000
+            let maxDim = max(origW, origH)
+
+            let options: [CFString: Any] = [
+                kCGImageSourceThumbnailMaxPixelSize: maxDim,
+                kCGImageSourceCreateThumbnailFromImageAlways: true,
+                kCGImageSourceCreateThumbnailWithTransform: true,
+                kCGImageSourceShouldCache: false,
+                kCGImageSourceShouldCacheImmediately: true
+            ]
+            guard let cgImage = CGImageSourceCreateThumbnailAtIndex(source, 0, options as CFDictionary) else { return nil }
+            return NSImage(cgImage: cgImage, size: NSSize(width: cgImage.width, height: cgImage.height))
+        }.value
+
+        guard !Task.isCancelled else { return }
+        self.image = loaded
     }
 }
 
