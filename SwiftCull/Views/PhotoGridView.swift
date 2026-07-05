@@ -1,6 +1,6 @@
 import SwiftUI
 
-private enum PhotoGroupingMode: String, CaseIterable, Identifiable {
+enum PhotoGroupingMode: String, CaseIterable, Identifiable {
     case all
     case month
     case day
@@ -24,7 +24,7 @@ private enum PhotoGroupingMode: String, CaseIterable, Identifiable {
     }
 }
 
-private enum PhotoSelectionScope {
+enum PhotoSelectionScope {
     case all
     case month
     case day
@@ -32,11 +32,11 @@ private enum PhotoSelectionScope {
 
 struct PhotoGridView: View {
     @EnvironmentObject var store: PhotoStore
-    @State private var gridSize: CGFloat = 160
+    @State private var gridSize: CGFloat = 110
     @State private var lastSelectedPhoto: PhotoEntry?
     @State private var groupingMode: PhotoGroupingMode = .all
-    private let minGridSize: CGFloat = 100
-    private let maxGridSize: CGFloat = 300
+    private let minGridSize: CGFloat = 80
+    private let maxGridSize: CGFloat = 220
 
     private var isSelectMode: Bool { store.isSelectMode }
 
@@ -53,16 +53,20 @@ struct PhotoGridView: View {
 
             Divider()
 
-            selectionCommandPanel
-                .padding(.horizontal, 22)
-                .padding(.vertical, 8)
-                .background(.bar)
+            if store.isSelectMode {
+                selectionCommandPanel
+                    .padding(.horizontal, 22)
+                    .padding(.vertical, 8)
+                    .background(.bar)
+                    .transition(.move(edge: .top).combined(with: .opacity))
 
-            Divider()
+                Divider()
+            }
 
             photoContent
         }
-        .animation(.snappy(duration: 0.24), value: store.selectedCount)
+        .animation(.snappy(duration: 0.24), value: store.isSelectMode)
+        .animation(.snappy(duration: 0.2), value: store.selectedCount)
     }
 
     @ViewBuilder
@@ -96,9 +100,9 @@ struct PhotoGridView: View {
             Spacer(minLength: 24)
 
             HStack(spacing: 12) {
-                Slider(value: $gridSize, in: minGridSize...maxGridSize, step: 20)
-                    .frame(width: 136)
-                    .help("调整缩略图大小")
+                Slider(value: $gridSize, in: minGridSize...maxGridSize)
+                    .frame(width: 150)
+                    .help("缩略图 \(Int(gridSize))px")
 
                 Image(systemName: "square.grid.2x2")
                     .foregroundStyle(.secondary)
@@ -247,8 +251,6 @@ struct PhotoGridView: View {
             }
             .buttonStyle(SelectionSecondaryButtonStyle())
             .disabled(!isSelectMode)
-
-            selectionScopeMenu(width: 30)
         }
     }
 
@@ -279,8 +281,6 @@ struct PhotoGridView: View {
             .buttonStyle(SelectionIconButtonStyle(width: 28, height: 28))
             .disabled(!isSelectMode)
             .help("取消")
-
-            selectionScopeMenu(width: 28)
         }
     }
 
@@ -424,36 +424,6 @@ struct PhotoGridView: View {
         .disabled(store.selectedCount == 0)
     }
 
-    private func selectionScopeMenu(width: CGFloat) -> some View {
-        Menu {
-            Button {
-                selectPhotos(.all)
-            } label: {
-                Label("所有照片", systemImage: "photo.stack")
-            }
-
-            Button {
-                selectPhotos(.month)
-            } label: {
-                Label("当前月份", systemImage: "calendar")
-            }
-            .disabled(selectionReferencePhoto == nil)
-
-            Button {
-                selectPhotos(.day)
-            } label: {
-                Label("当前日期", systemImage: "calendar.day.timeline.left")
-            }
-            .disabled(selectionReferencePhoto == nil)
-        } label: {
-            Image(systemName: "checkmark.square")
-                .font(.system(size: 14, weight: .medium))
-        }
-        .menuStyle(.button)
-        .buttonStyle(SelectionIconButtonStyle(width: width, height: 28))
-        .help("按范围选择")
-    }
-
     private var selectionReferencePhoto: PhotoEntry? {
         store.selectedPhoto ?? store.selectedPhotoEntries.first ?? store.filteredPhotos.first
     }
@@ -499,114 +469,9 @@ struct PhotoGridView: View {
     }
 }
 
-private struct BatchSectionLabel: View {
-    let title: String
-    let systemImage: String
+// MARK: - Grid Content & Drag Selection
 
-    var body: some View {
-        Label(title, systemImage: systemImage)
-            .font(.caption2.weight(.semibold))
-            .foregroundStyle(.secondary)
-            .labelStyle(.titleAndIcon)
-    }
-}
-
-private struct PanelDivider: View {
-    var height: CGFloat = 24
-
-    var body: some View {
-        Rectangle()
-            .fill(Color.primary.opacity(0.1))
-            .frame(width: 1, height: height)
-    }
-}
-
-private struct SelectionIconButtonStyle: ButtonStyle {
-    @Environment(\.isEnabled) private var isEnabled
-
-    var width: CGFloat = 34
-    var height: CGFloat = 30
-    var cornerRadius: CGFloat = 9
-
-    func makeBody(configuration: Configuration) -> some View {
-        configuration.label
-            .foregroundStyle(isEnabled ? Color.primary : Color.secondary.opacity(0.5))
-            .frame(width: width, height: height)
-            .background {
-                RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
-                    .fill(Color(nsColor: .controlBackgroundColor).opacity(configuration.isPressed ? 0.85 : 0.58))
-            }
-            .overlay {
-                RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
-                    .strokeBorder(Color.primary.opacity(configuration.isPressed ? 0.14 : 0.07), lineWidth: 0.7)
-            }
-            .opacity(isEnabled ? 1 : 0.48)
-            .scaleEffect(configuration.isPressed ? 0.97 : 1)
-            .animation(.snappy(duration: 0.16), value: configuration.isPressed)
-    }
-}
-
-private struct SelectionPrimaryButtonStyle: ButtonStyle {
-    @Environment(\.isEnabled) private var isEnabled
-
-    func makeBody(configuration: Configuration) -> some View {
-        configuration.label
-            .foregroundStyle(isEnabled ? .white : Color.secondary.opacity(0.55))
-            .background {
-                RoundedRectangle(cornerRadius: 9, style: .continuous)
-                    .fill(isEnabled ? Color.accentColor.opacity(configuration.isPressed ? 0.78 : 0.94) : Color(nsColor: .controlBackgroundColor).opacity(0.58))
-            }
-            .overlay {
-                RoundedRectangle(cornerRadius: 9, style: .continuous)
-                    .strokeBorder(isEnabled ? .white.opacity(0.18) : Color.primary.opacity(0.06), lineWidth: 0.7)
-            }
-            .opacity(isEnabled ? 1 : 0.55)
-            .scaleEffect(configuration.isPressed ? 0.98 : 1)
-            .animation(.snappy(duration: 0.16), value: configuration.isPressed)
-    }
-}
-
-private struct SelectionSecondaryButtonStyle: ButtonStyle {
-    @Environment(\.isEnabled) private var isEnabled
-
-    func makeBody(configuration: Configuration) -> some View {
-        configuration.label
-            .foregroundStyle(isEnabled ? .primary : Color.secondary.opacity(0.55))
-            .background {
-                RoundedRectangle(cornerRadius: 9, style: .continuous)
-                    .fill(Color(nsColor: .controlBackgroundColor).opacity(configuration.isPressed ? 0.9 : 0.66))
-            }
-            .overlay {
-                RoundedRectangle(cornerRadius: 9, style: .continuous)
-                    .strokeBorder(Color.primary.opacity(configuration.isPressed ? 0.16 : 0.08), lineWidth: 0.7)
-            }
-            .opacity(isEnabled ? 1 : 0.55)
-            .scaleEffect(configuration.isPressed ? 0.98 : 1)
-            .animation(.snappy(duration: 0.16), value: configuration.isPressed)
-    }
-}
-
-private struct SelectionDestructiveButtonStyle: ButtonStyle {
-    @Environment(\.isEnabled) private var isEnabled
-
-    func makeBody(configuration: Configuration) -> some View {
-        configuration.label
-            .foregroundStyle(isEnabled ? Color.red : Color.secondary.opacity(0.5))
-            .background {
-                RoundedRectangle(cornerRadius: 9, style: .continuous)
-                    .fill(Color.red.opacity(configuration.isPressed ? 0.15 : 0.08))
-            }
-            .overlay {
-                RoundedRectangle(cornerRadius: 9, style: .continuous)
-                    .strokeBorder(Color.red.opacity(isEnabled ? 0.16 : 0.06), lineWidth: 0.7)
-            }
-            .opacity(isEnabled ? 1 : 0.5)
-            .scaleEffect(configuration.isPressed ? 0.98 : 1)
-            .animation(.snappy(duration: 0.16), value: configuration.isPressed)
-    }
-}
-
-private struct PhotoGridSection: Identifiable {
+struct PhotoGridSection: Identifiable {
     let id: String
     let title: String
     let subtitle: String
@@ -651,7 +516,7 @@ private struct PhotoGroupHeader: View {
     }
 }
 
-private struct PhotoGridContent: View {
+struct PhotoGridContent: View {
     @ObservedObject var store: PhotoStore
     let gridSize: CGFloat
     let columns: [GridItem]
@@ -667,6 +532,18 @@ private struct PhotoGridContent: View {
     @State private var lastDragUpdateTime: CFAbsoluteTime = 0
 
     private let gridCoordinateSpace = "photo-grid-space"
+
+    private func selectionOverlay(for rect: CGRect) -> some View {
+        Rectangle()
+            .fill(Color.accentColor.opacity(0.14))
+            .overlay(
+                Rectangle()
+                    .stroke(Color.accentColor, lineWidth: 1)
+            )
+            .frame(width: rect.width, height: rect.height)
+            .offset(x: rect.minX, y: rect.minY)
+            .allowsHitTesting(false)
+    }
 
     private var selectionRect: CGRect? {
         guard let dragStart, let dragCurrent else { return nil }
@@ -720,25 +597,23 @@ private struct PhotoGridContent: View {
                     .coordinateSpace(name: gridCoordinateSpace)
                     .overlay(alignment: .topLeading) {
                         if let selectionRect {
-                            Rectangle()
-                                .fill(Color.accentColor.opacity(0.14))
-                                .overlay(
-                                    Rectangle()
-                                        .stroke(Color.accentColor, lineWidth: 1)
-                                )
-                                .frame(width: selectionRect.width, height: selectionRect.height)
-                                .offset(x: selectionRect.minX, y: selectionRect.minY)
-                                .allowsHitTesting(false)
+                            selectionOverlay(for: selectionRect)
                         }
                     }
                     .contentShape(Rectangle())
                     .simultaneousGesture(selectionDragGesture)
                     .onPreferenceChange(PhotoItemFramePreferenceKey.self) { frames in
+                        let latest: [String: CGRect]
                         if dragStart == nil {
                             itemFrames = frames
+                            latest = frames
                         } else {
                             itemFrames.merge(frames, uniquingKeysWith: { _, new in new })
+                            latest = itemFrames
                             updateDragSelection()
+                        }
+                        if let count = columnCount(from: latest) {
+                            store.updateGridColumnCount(count)
                         }
                     }
                 }
@@ -755,7 +630,7 @@ private struct PhotoGridContent: View {
                     itemFrames = [:]
                     updateGridColumnCount(width: geometry.size.width)
                 }
-                .onChange(of: store.filteredPhotos.map(\.id)) { _, _ in
+                .onChange(of: store.filteredPhotosVersion) { _, _ in
                     itemFrames = [:]
                     cachedPhotoIds = Set(store.filteredPhotos.map(\.id))
                 }
@@ -763,14 +638,12 @@ private struct PhotoGridContent: View {
             .onChange(of: store.selectedPhoto?.id) { _, newId in
                 guard dragStart == nil else { return }
                 if let newId = newId {
-                    withAnimation(.easeOut(duration: 0.15)) {
-                        proxy.scrollTo(newId, anchor: .center)
-                    }
+                    proxy.scrollTo(newId, anchor: .center)
                 }
             }
             .task(id: store.viewMode) {
                 guard store.viewMode == .grid, let selectedId = store.selectedPhoto?.id else { return }
-                try? await Task.sleep(for: .milliseconds(150))
+                try? await Task.sleep(for: .milliseconds(300))
                 proxy.scrollTo(selectedId, anchor: .center)
             }
         }
@@ -784,6 +657,7 @@ private struct PhotoGridContent: View {
             isPrimary: store.selectedPhoto?.id == photo.id,
             isSelectMode: isSelectMode
         )
+        .environmentObject(store)
         .id(photo.id)
         .onAppear {
             store.preloadThumbnails(around: photo, size: gridSize)
@@ -925,9 +799,26 @@ private struct PhotoGridContent: View {
     }
 
     private func updateGridColumnCount(width: CGFloat) {
-        let columnWidth = gridSize + 4
-        let count = max(1, Int((width + 4) / columnWidth))
+        // 初始估算（帧尚未就绪时的兜底）。稳态下由 columnCount(from:) 依据实际布局帧校正。
+        // 可用宽度 = 总宽 - ScrollView 水平内边距(14×2) - LazyVGrid 内边距(4×2)
+        let horizontalInset: CGFloat = 14 * 2 + 4 * 2
+        let columnSpacing: CGFloat = 4
+        let available = max(0, width - horizontalInset)
+        let count = max(1, Int((available + columnSpacing) / (gridSize + columnSpacing)))
         store.updateGridColumnCount(count)
+    }
+
+    /// 根据照片卡片的实际布局帧推断每行列数：把处于同一行（minY 相同）的卡片计数，
+    /// 取所有行中的最大值即为满行列数。比按宽度估算精确，免疫内边距/滚动条等差异，
+    /// 从而保证方向键上/下在任意网格尺寸下都精准跨行。
+    private func columnCount(from frames: [String: CGRect]) -> Int? {
+        guard !frames.isEmpty else { return nil }
+        var perRow: [Int: Int] = [:]
+        for rect in frames.values {
+            let rowKey = Int(rect.minY.rounded())
+            perRow[rowKey, default: 0] += 1
+        }
+        return perRow.values.max()
     }
 
     private func handleTap(photo: PhotoEntry) {
@@ -973,184 +864,5 @@ struct PhotoItemFramePreferenceKey: PreferenceKey {
 
     static func reduce(value: inout [String: CGRect], nextValue: () -> [String: CGRect]) {
         value.merge(nextValue(), uniquingKeysWith: { _, new in new })
-    }
-}
-
-struct SelectablePhotoCardView: View {
-    let photo: PhotoEntry
-    let gridSize: CGFloat
-    let isSelected: Bool
-    let isPrimary: Bool
-    let isSelectMode: Bool
-
-    var body: some View {
-        VStack(spacing: 0) {
-            cardImage
-            infoBar
-        }
-        .background(cardBackground)
-        .clipShape(RoundedRectangle(cornerRadius: 4))
-        .overlay(cardBorder)
-    }
-
-    private var cardImage: some View {
-        ZStack {
-            AsyncThumbnailView(
-                photoId: photo.id,
-                imagePath: photo.primaryFilePath,
-                size: gridSize,
-                isVideo: photo.isVideoOnly
-            )
-            .frame(width: gridSize, height: gridSize)
-
-            badgeOverlay
-
-            if isSelected && !isPrimary {
-                Rectangle()
-                    .fill(Color.accentColor.opacity(0.2))
-            }
-
-            if isSelectMode {
-                selectCheckOverlay
-            }
-        }
-        .frame(width: gridSize, height: gridSize)
-        .clipped()
-    }
-
-    private var selectCheckOverlay: some View {
-        VStack {
-            HStack {
-                Spacer()
-                selectCheck
-            }
-            Spacer()
-        }
-        .padding(4)
-    }
-
-    private var selectCheck: some View {
-        ZStack {
-            Circle()
-                .fill(isSelected ? Color.accentColor : Color.black.opacity(0.4))
-                .frame(width: 20, height: 20)
-            if isSelected {
-                Image(systemName: "checkmark")
-                    .font(.system(size: 11, weight: .bold))
-                    .foregroundStyle(.white)
-            }
-        }
-    }
-
-    private var badgeOverlay: some View {
-        VStack {
-            HStack {
-                topLeftBadge
-                Spacer()
-                if !isSelectMode {
-                    topRightBadge
-                }
-            }
-            Spacer()
-        }
-        .padding(4)
-    }
-
-    private var cardBackground: Color {
-        if isPrimary { return Color.accentColor.opacity(0.15) }
-        if isSelected { return Color.accentColor.opacity(0.08) }
-        return Color.clear
-    }
-
-    private var cardBorder: some View {
-        RoundedRectangle(cornerRadius: 4)
-            .stroke(
-                isPrimary ? Color.accentColor : (isSelected ? Color.accentColor.opacity(0.5) : Color.clear),
-                lineWidth: isPrimary ? 2 : 1
-            )
-    }
-
-    private var topLeftBadge: some View {
-        Group {
-            if photo.hasAnyMark {
-                HStack(spacing: 3) {
-                    if photo.workflowMark != .none {
-                        workflowBadge
-                    }
-                    if photo.rating > 0 {
-                        ratingBadge
-                    }
-                    ForEach(photo.tags.prefix(3), id: \.self) { tagName in
-                        Circle()
-                            .fill(FinderTagService.shared.colorForTag(tagName))
-                            .frame(width: 10, height: 10)
-                            .overlay(Circle().stroke(Color.white, lineWidth: 1.5))
-                    }
-                }
-            }
-        }
-    }
-
-    private var workflowBadge: some View {
-        HStack(spacing: 2) {
-            Image(systemName: photo.workflowMark == .pick ? "flag.fill" : "xmark")
-                .font(.system(size: 8, weight: .bold))
-            Text(photo.workflowMark == .pick ? "P" : "X")
-                .font(.system(size: 9, weight: .bold))
-        }
-        .foregroundStyle(.white)
-        .padding(.horizontal, 4)
-        .padding(.vertical, 2)
-        .background(photo.workflowMark == .pick ? Color.green.opacity(0.9) : Color.red.opacity(0.9))
-        .clipShape(Capsule())
-    }
-
-    private var ratingBadge: some View {
-        HStack(spacing: 1) {
-            Image(systemName: "star.fill")
-                .font(.system(size: 8))
-            Text("\(photo.rating)")
-                .font(.system(size: 9, weight: .bold))
-        }
-        .foregroundStyle(.white)
-        .padding(.horizontal, 4)
-        .padding(.vertical, 2)
-        .background(Color.orange.opacity(0.9))
-        .clipShape(Capsule())
-    }
-
-    private var topRightBadge: some View {
-        Text(photo.fileTypeBadge)
-            .font(.system(size: 8, weight: .bold))
-            .foregroundStyle(.white)
-            .padding(.horizontal, 4)
-            .padding(.vertical, 2)
-            .background(photo.fileTypeBadgeColor.opacity(0.85))
-            .clipShape(Capsule())
-    }
-
-    private var infoBar: some View {
-        VStack(spacing: 2) {
-            Text(photo.displayName)
-                .font(.system(size: 9))
-                .lineLimit(1)
-                .truncationMode(.middle)
-
-            HStack(spacing: 4) {
-                Text(photo.formattedCaptureDate)
-                    .font(.system(size: 7))
-                    .foregroundStyle(.secondary)
-
-                if photo.rating > 0 {
-                    Text(String(repeating: "★", count: photo.rating))
-                        .font(.system(size: 7))
-                        .foregroundStyle(.orange)
-                }
-            }
-        }
-        .padding(.horizontal, 4)
-        .padding(.vertical, 3)
-        .frame(width: gridSize)
-        .background(Color(nsColor: .controlBackgroundColor).opacity(0.8))
     }
 }

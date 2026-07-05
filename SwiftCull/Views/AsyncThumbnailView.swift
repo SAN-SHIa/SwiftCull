@@ -86,15 +86,11 @@ struct AsyncThumbnailView: View {
         let requestCacheId = cacheId
         let requestPath = imagePath
         let requestSize = size
-        loadTask = Task {
+        loadTask = Task { @MainActor in
             let newImage = await service.thumbnail(path: requestPath, id: requestCacheId, size: requestSize)
             guard !Task.isCancelled else { return }
-            await MainActor.run {
-                guard cacheId == requestCacheId else { return }
-                if let newImage {
-                    self.image = newImage
-                }
-            }
+            guard cacheId == requestCacheId, let newImage else { return }
+            self.image = newImage
         }
     }
 }
@@ -103,7 +99,6 @@ struct DetailThumbnailView: View {
     let photo: PhotoEntry
     var targetSize: CGFloat = 1000
     @State private var image: NSImage?
-    @State private var loadTask: Task<Void, Never>?
 
     private var cacheId: String {
         "detail|\(photo.primaryFilePath)|\(Int(targetSize.rounded()))"
@@ -133,58 +128,52 @@ struct DetailThumbnailView: View {
             }
         }
         .frame(maxWidth: .infinity)
-        .onAppear {
-            loadDetailImage()
-        }
-        .onDisappear {
-            loadTask?.cancel()
-            loadTask = nil
-        }
-        .onChange(of: photo.primaryFilePath) { _, _ in
-            loadTask?.cancel()
-            image = nil
-            loadDetailImage()
+        .id(photo.primaryFilePath)
+        .task(id: photo.primaryFilePath) {
+            await loadDetailImage()
         }
     }
 
-    private func loadDetailImage() {
-        loadTask?.cancel()
+    private func loadDetailImage() async {
         let path = photo.primaryImagePath.isEmpty ? (photo.movPath ?? "") : photo.primaryImagePath
         guard !path.isEmpty else { return }
 
         let requestPath = path
         let isVideo = photo.isVideoOnly
-        loadTask = Task {
-            let image: NSImage? = await Task.detached(priority: .userInitiated) {
-                if isVideo {
-                    let service = ThumbnailService.shared
-                    return await service.thumbnail(path: requestPath, id: "detail|\(requestPath)", size: 800)
+        let loaded = await loadDetailImageBackground(path: requestPath, isVideo: isVideo)
+
+        guard !Task.isCancelled else { return }
+        self.image = loaded
+    }
+
+    /// Background image loading; isolated to avoid NSImage Sendable issues on older SDKs.
+    private nonisolated func loadDetailImageBackground(path: String, isVideo: Bool) async -> NSImage? {
+        if isVideo {
+            let service = ThumbnailService.shared
+            // Use withCheckedContinuation to avoid NSImage Sendable requirement in task groups
+            return await withCheckedContinuation { continuation in
+                service.generateThumbnail(path: path, id: "detail|\(path)", size: 800) { image in
+                    continuation.resume(returning: image)
                 }
-                let url = URL(fileURLWithPath: requestPath)
-                guard let source = CGImageSourceCreateWithURL(url as CFURL, nil) else { return nil }
-
-                // Read original dimensions to request full-size thumbnail
-                let properties = CGImageSourceCopyPropertiesAtIndex(source, 0, nil) as? [CFString: Any]
-                let origW = properties?[kCGImagePropertyPixelWidth] as? CGFloat ?? 6000
-                let origH = properties?[kCGImagePropertyPixelHeight] as? CGFloat ?? 4000
-                let maxDim = max(origW, origH)
-
-                let options: [CFString: Any] = [
-                    kCGImageSourceThumbnailMaxPixelSize: maxDim,
-                    kCGImageSourceCreateThumbnailFromImageAlways: true,
-                    kCGImageSourceCreateThumbnailWithTransform: true,
-                    kCGImageSourceShouldCache: false,
-                    kCGImageSourceShouldCacheImmediately: true
-                ]
-                guard let cgImage = CGImageSourceCreateThumbnailAtIndex(source, 0, options as CFDictionary) else { return nil }
-                return NSImage(cgImage: cgImage, size: NSSize(width: cgImage.width, height: cgImage.height))
-            }.value
-
-            guard !Task.isCancelled else { return }
-            await MainActor.run {
-                self.image = image
             }
         }
+        let url = URL(fileURLWithPath: path)
+        guard let source = CGImageSourceCreateWithURL(url as CFURL, nil) else { return nil }
+
+        let properties = CGImageSourceCopyPropertiesAtIndex(source, 0, nil) as? [CFString: Any]
+        let origW = properties?[kCGImagePropertyPixelWidth] as? CGFloat ?? 6000
+        let origH = properties?[kCGImagePropertyPixelHeight] as? CGFloat ?? 4000
+        let maxDim = max(origW, origH)
+
+        let options: [CFString: Any] = [
+            kCGImageSourceThumbnailMaxPixelSize: maxDim,
+            kCGImageSourceCreateThumbnailFromImageAlways: true,
+            kCGImageSourceCreateThumbnailWithTransform: true,
+            kCGImageSourceShouldCache: false,
+            kCGImageSourceShouldCacheImmediately: true
+        ]
+        guard let cgImage = CGImageSourceCreateThumbnailAtIndex(source, 0, options as CFDictionary) else { return nil }
+        return NSImage(cgImage: cgImage, size: NSSize(width: cgImage.width, height: cgImage.height))
     }
 }
 

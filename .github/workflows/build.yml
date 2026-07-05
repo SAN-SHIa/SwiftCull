@@ -1,0 +1,85 @@
+name: Build & Release
+
+on:
+  push:
+    branches: [ "main", "release/**" ]
+    tags: [ "v*" ]
+  pull_request:
+    branches: [ "main" ]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: macos-15
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install XcodeGen
+        run: brew install xcodegen
+
+      - name: Generate Xcode project
+        run: xcodegen generate
+
+      - name: Build
+        run: |
+          xcodebuild \
+            -project SwiftCull.xcodeproj \
+            -scheme SwiftCull \
+            -configuration Release \
+            -derivedDataPath "$RUNNER_TEMP/deriveddata" \
+            CONFIGURATION_BUILD_DIR="$RUNNER_TEMP/build/Release" \
+            CODE_SIGN_IDENTITY="-" \
+            CODE_SIGN_STYLE=Automatic \
+            build
+
+      - name: Package DMG
+        run: |
+          APP_PATH="$RUNNER_TEMP/build/Release/SwiftCull.app"
+          DMG_DIR="$RUNNER_TEMP/dmg"
+          DMG_RW="$RUNNER_TEMP/dmg_rw.dmg"
+          DMG_OUTPUT="SwiftCull.dmg"
+
+          echo "==> Preparing DMG contents..."
+          mkdir -p "$DMG_DIR"
+          cp -R "$APP_PATH" "$DMG_DIR/"
+          ln -s /Applications "$DMG_DIR/Applications"
+
+          echo "==> Creating DMG..."
+          hdiutil create \
+            -volname "SwiftCull" \
+            -srcfolder "$DMG_DIR" \
+            -ov \
+            -format UDZO \
+            -imagekey zlib-level=9 \
+            "$DMG_OUTPUT"
+
+          echo "==> DMG created: $(du -sh "$DMG_OUTPUT" | cut -f1)"
+
+      - name: Upload DMG artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: SwiftCull.dmg
+          path: SwiftCull.dmg
+
+  release:
+    needs: build
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: macos-15
+
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: SwiftCull.dmg
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: SwiftCull.dmg
+          generate_release_notes: true

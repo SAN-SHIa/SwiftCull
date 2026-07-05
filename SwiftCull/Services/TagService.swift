@@ -74,34 +74,6 @@ final class TagService: @unchecked Sendable {
         try? mutableUrl.setResourceValues(resourceValues)
     }
 
-    func addTag(_ tag: String, to path: String) -> Bool {
-        var currentTags = getTags(for: path)
-        if !currentTags.contains(tag) {
-            currentTags.append(tag)
-            return setTags(currentTags, for: path)
-        }
-        return true
-    }
-
-    func removeTag(_ tag: String, from path: String) -> Bool {
-        var currentTags = getTags(for: path)
-        currentTags.removeAll { $0 == tag }
-        return setTags(currentTags, for: path)
-    }
-
-    func getAllTags(for photos: [PhotoEntry]) -> [String] {
-        var allTags = Set<String>()
-        for photo in photos {
-            if let jpgPath = photo.jpgPath {
-                allTags.formUnion(getTags(for: jpgPath))
-            }
-            if let nefPath = photo.nefPath {
-                allTags.formUnion(getTags(for: nefPath))
-            }
-        }
-        return allTags.sorted()
-    }
-
     func setTagsForPhotoPair(_ tags: [String], photo: PhotoEntry, colorLookup: [String: Int] = [:]) -> Bool {
         var success = true
         if let jpgPath = photo.jpgPath {

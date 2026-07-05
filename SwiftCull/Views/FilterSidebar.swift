@@ -11,6 +11,7 @@ struct FilterSidebar: View {
                     ratingSection
                     tagSection
                     fileTypeSection
+                    dateFilterSection
                     sortSection
                 }
                 .padding(.horizontal, 12)
@@ -170,6 +171,200 @@ struct FilterSidebar: View {
         }
     }
 
+    private var dateFilterSection: some View {
+        GlassCard {
+            VStack(alignment: .leading, spacing: 8) {
+                HStack {
+                    SectionHeader(icon: "calendar", title: "日期范围")
+                    Spacer()
+                    Toggle("", isOn: $store.filterOptions.dateFilterEnabled)
+                        .labelsHidden()
+                        .controlSize(.mini)
+                        .onChange(of: store.filterOptions.dateFilterEnabled) { _, enabled in
+                            if enabled {
+                                applyPreset(.today)
+                            } else {
+                                store.filterOptions.startDate = nil
+                                store.filterOptions.endDate = nil
+                                store.filterOptions.activePreset = nil
+                            }
+                            scheduleFilter()
+                        }
+                }
+
+                if store.filterOptions.dateFilterEnabled {
+                    // 快捷预设按钮
+                    presetButtons
+
+                    // 日期输入区
+                    dateInputRow
+
+                    // 最近使用
+                    if !recentDateRanges.isEmpty {
+                        recentSection
+                    }
+                }
+            }
+        }
+        .animation(.smooth(duration: 0.2), value: store.filterOptions.dateFilterEnabled)
+    }
+
+    // MARK: - 快捷预设
+
+    private var presetButtons: some View {
+        FlowLayout(spacing: 6) {
+            ForEach([DatePreset.today, .yesterday, .last7Days, .last30Days, .custom], id: \.self) { preset in
+                Button {
+                    applyPreset(preset)
+                    scheduleFilter()
+                } label: {
+                    Text(preset.displayName)
+                        .font(.system(size: 11, weight: store.filterOptions.activePreset == preset ? .semibold : .regular))
+                        .padding(.horizontal, 9)
+                        .padding(.vertical, 4)
+                        .background(
+                            Capsule().fill(store.filterOptions.activePreset == preset
+                                           ? Color.accentColor.opacity(0.15)
+                                           : Color.clear)
+                        )
+                        .overlay(
+                            Capsule().strokeBorder(
+                                store.filterOptions.activePreset == preset
+                                ? Color.accentColor.opacity(0.4)
+                                : Color.secondary.opacity(0.2),
+                                lineWidth: 0.5
+                            )
+                        )
+                }
+                .buttonStyle(.plain)
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    // MARK: - 日期输入
+
+    private var dateInputRow: some View {
+        HStack(spacing: 6) {
+            VStack(alignment: .leading, spacing: 2) {
+                Text("开始")
+                    .font(.system(size: 9))
+                    .foregroundStyle(.tertiary)
+                DatePickerTextField(
+                    date: Binding(
+                        get: { store.filterOptions.startDate ?? Calendar.current.startOfDay(for: Date()) },
+                        set: { newDate in
+                            store.filterOptions.startDate = newDate
+                            // 自动联动：结束日期不能早于开始日期
+                            if let end = store.filterOptions.endDate, end < newDate {
+                                store.filterOptions.endDate = newDate
+                            }
+                            store.filterOptions.activePreset = .custom
+                            saveRecentRange()
+                            scheduleFilter()
+                        }
+                    )
+                )
+            }
+
+            Text("至")
+                .font(.system(size: 10))
+                .foregroundStyle(.tertiary)
+                .padding(.top, 10)
+
+            VStack(alignment: .leading, spacing: 2) {
+                Text("结束")
+                    .font(.system(size: 9))
+                    .foregroundStyle(.tertiary)
+                DatePickerTextField(
+                    date: Binding(
+                        get: { store.filterOptions.endDate ?? Date() },
+                        set: { newDate in
+                            store.filterOptions.endDate = newDate
+                            // 自动联动：开始日期不能晚于结束日期
+                            if let start = store.filterOptions.startDate, start > newDate {
+                                store.filterOptions.startDate = newDate
+                            }
+                            store.filterOptions.activePreset = .custom
+                            saveRecentRange()
+                            scheduleFilter()
+                        }
+                    )
+                )
+            }
+        }
+        .transition(.opacity.combined(with: .move(edge: .top)))
+    }
+
+    // MARK: - 最近使用
+
+    private var recentSection: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text("最近使用")
+                .font(.system(size: 9))
+                .foregroundStyle(.tertiary)
+            HStack(spacing: 4) {
+                ForEach(recentDateRanges.prefix(3), id: \.self) { range in
+                    Button {
+                        store.filterOptions.startDate = range.start
+                        store.filterOptions.endDate = range.end
+                        store.filterOptions.activePreset = .custom
+                        scheduleFilter()
+                    } label: {
+                        Text(range.label)
+                            .font(.system(size: 9))
+                            .padding(.horizontal, 5)
+                            .padding(.vertical, 2)
+                            .background(Capsule().fill(Color.secondary.opacity(0.08)))
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+        }
+    }
+
+    // MARK: - Actions
+
+    private func applyPreset(_ preset: DatePreset) {
+        store.filterOptions.activePreset = preset
+        if let range = preset.dateRange {
+            store.filterOptions.startDate = range.start
+            store.filterOptions.endDate = range.end
+        }
+        saveRecentRange()
+    }
+
+    // MARK: - 最近使用记录
+
+    private struct RecentDateRange: Codable, Hashable, Sendable {
+        let start: Date
+        let end: Date
+
+        var label: String {
+            let f = DateFormatter()
+            f.dateFormat = "M/d"
+            return "\(f.string(from: start))-\(f.string(from: end))"
+        }
+    }
+
+    @AppStorage("recentDateRanges") private var recentDateRangesData: Data = Data()
+
+    private var recentDateRanges: [RecentDateRange] {
+        get {
+            guard let decoded = try? JSONDecoder().decode([RecentDateRange].self, from: recentDateRangesData) else { return [] }
+            return decoded
+        }
+    }
+
+    private func saveRecentRange() {
+        guard let start = store.filterOptions.startDate, let end = store.filterOptions.endDate else { return }
+        let new = RecentDateRange(start: start, end: end)
+        var recent = recentDateRanges.filter { $0 != new }
+        recent.insert(new, at: 0)
+        if recent.count > 5 { recent = Array(recent.prefix(5)) }
+        recentDateRangesData = (try? JSONEncoder().encode(recent)) ?? Data()
+    }
+
     private var sortSection: some View {
         GlassCard {
             VStack(alignment: .leading, spacing: 10) {
@@ -266,155 +461,115 @@ struct FilterSidebar: View {
                     Button {
                         store.exportFilteredPhotos()
                     } label: {
-                        HStack {
-                            if store.isExporting {
-                                ProgressView()
-                                    .scaleEffect(0.6)
-                                    .frame(width: 14, height: 14)
-                            } else {
-                                Image(systemName: "square.and.arrow.up")
-                                    .font(.system(size: 13, weight: .medium))
+                        VStack(spacing: 5) {
+                            HStack(spacing: 6) {
+                                if store.isExporting {
+                                    Text("导出中 \(Int(store.exportProgress * 100))%")
+                                        .font(.system(size: 13, weight: .medium))
+                                        .monospacedDigit()
+                                } else {
+                                    Image(systemName: "square.and.arrow.up")
+                                        .font(.system(size: 13, weight: .medium))
+                                    Text("导出筛选结果")
+                                        .font(.system(size: 13, weight: .medium))
+                                }
                             }
-                            Text(store.isExporting ? "导出中..." : "导出筛选结果")
-                                .font(.system(size: 13, weight: .medium))
+
+                            if store.isExporting {
+                                ProgressView(value: store.exportProgress)
+                                    .progressViewStyle(.linear)
+                                    .tint(Color.accentColor)
+                            }
                         }
                         .frame(maxWidth: .infinity)
                         .padding(.vertical, 8)
+                        .padding(.horizontal, 10)
                         .background(Color.accentColor.opacity(0.15))
                         .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
                     }
                     .buttonStyle(.plain)
                     .disabled(store.isExporting || store.photoCount == 0)
-                    .opacity(store.isExporting ? 0.6 : 1.0)
+                    .animation(.smooth(duration: 0.2), value: store.isExporting)
                 }
             }
         }
     }
 }
 
-private struct GlassCard<Content: View>: View {
-    @ViewBuilder let content: () -> Content
+// MARK: - 日期文本输入框（可编辑 + 日历弹窗）
+
+private struct DatePickerTextField: View {
+    @Binding var date: Date
+    @State private var text: String = ""
+    @State private var isValid: Bool = true
+    @State private var showCalendar: Bool = false
+
+    private static let displayFormatter: DateFormatter = {
+        let f = DateFormatter()
+        f.dateFormat = "yyyy/MM/dd"
+        return f
+    }()
+
+    private static let inputFormatters: [DateFormatter] = {
+        let patterns = ["yyyy-MM-dd", "yyyy/MM/dd", "yyyy/M/d", "yyyy-MM-d", "yyyy/M/dd"]
+        return patterns.map { p in
+            let f = DateFormatter()
+            f.dateFormat = p
+            f.isLenient = true
+            return f
+        }
+    }()
 
     var body: some View {
-        content()
-            .padding(12)
-            .background(.ultraThinMaterial)
-            .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
-            .overlay(
-                RoundedRectangle(cornerRadius: 14, style: .continuous)
-                    .strokeBorder(Color.primary.opacity(0.06), lineWidth: 0.5)
-            )
-    }
-}
-
-private struct SectionHeader: View {
-    let icon: String
-    let title: String
-
-    var body: some View {
-        Label(title, systemImage: icon)
-            .font(.system(size: 12, weight: .semibold))
-            .foregroundStyle(.secondary)
-    }
-}
-
-private struct FilterChip: View {
-    let title: String
-    var icon: String? = nil
-    let isSelected: Bool
-    let action: () -> Void
-
-    var body: some View {
-        Button(action: action) {
-            HStack(spacing: 4) {
-                if let icon {
-                    Image(systemName: icon)
-                        .font(.system(size: 10))
+        HStack(spacing: 2) {
+            TextField("YYYY/MM/DD", text: $text)
+                .textFieldStyle(.roundedBorder)
+                .font(.system(size: 11, design: .monospaced))
+                .frame(width: 90)
+                .foregroundStyle(isValid ? Color.primary : Color.red)
+                .onChange(of: text) { _, newValue in
+                    parseAndApply(newValue)
                 }
-                Text(title)
-                    .font(.system(size: 12, weight: isSelected ? .semibold : .regular))
+
+            Button {
+                showCalendar.toggle()
+            } label: {
+                Image(systemName: "calendar")
+                    .font(.system(size: 10))
+                    .foregroundStyle(.secondary)
             }
-            .padding(.horizontal, 10)
-            .padding(.vertical, 5)
-            .background {
-                Capsule()
-                    .fill(isSelected ? Color.accentColor.opacity(0.2) : .clear)
+            .buttonStyle(.borderless)
+            .popover(isPresented: $showCalendar) {
+                DatePicker("", selection: $date, displayedComponents: .date)
+                    .datePickerStyle(.graphical)
+                    .labelsHidden()
+                    .frame(width: 260)
+                    .padding(8)
+                    .onChange(of: date) { _, _ in
+                        text = Self.displayFormatter.string(from: date)
+                        showCalendar = false
+                    }
             }
-            .background(.ultraThinMaterial, in: Capsule())
-            .clipShape(Capsule())
-            .overlay(
-                Capsule()
-                    .strokeBorder(isSelected ? Color.accentColor.opacity(0.5) : Color.primary.opacity(0.08), lineWidth: isSelected ? 1.5 : 0.5)
-            )
         }
-        .buttonStyle(.plain)
-    }
-}
-
-private struct TagFilterChip: View {
-    let title: String
-    let color: Color?
-    let isSelected: Bool
-    let action: () -> Void
-
-    private var accentColor: Color {
-        color ?? .accentColor
-    }
-
-    var body: some View {
-        Button(action: action) {
-            HStack(spacing: 4) {
-                Circle()
-                    .fill(isSelected ? accentColor : (color ?? .secondary))
-                    .frame(width: 8, height: 8)
-                Text(title)
-                    .font(.system(size: 12, weight: isSelected ? .semibold : .regular))
-            }
-            .padding(.horizontal, 10)
-            .padding(.vertical, 5)
-            .background {
-                Capsule()
-                    .fill(isSelected ? accentColor.opacity(0.2) : .clear)
-            }
-            .background(.ultraThinMaterial, in: Capsule())
-            .clipShape(Capsule())
-            .overlay(
-                Capsule()
-                    .strokeBorder(isSelected ? accentColor.opacity(0.5) : Color.primary.opacity(0.08), lineWidth: isSelected ? 1.5 : 0.5)
-            )
+        .onAppear {
+            text = Self.displayFormatter.string(from: date)
         }
-        .buttonStyle(.plain)
-    }
-}
-
-private struct SortChip: View {
-    let title: String
-    let icon: String
-    let isSelected: Bool
-    let action: () -> Void
-
-    var body: some View {
-        Button(action: action) {
-            VStack(spacing: 3) {
-                Image(systemName: icon)
-                    .font(.system(size: 14))
-                Text(title)
-                    .font(.system(size: 10, weight: isSelected ? .semibold : .regular))
-            }
-            .frame(maxWidth: .infinity)
-            .padding(.vertical, 8)
-            .padding(.horizontal, 4)
-            .background {
-                RoundedRectangle(cornerRadius: 10, style: .continuous)
-                    .fill(isSelected ? Color.accentColor.opacity(0.2) : .clear)
-            }
-            .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
-            .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
-            .overlay(
-                RoundedRectangle(cornerRadius: 10, style: .continuous)
-                    .strokeBorder(isSelected ? Color.accentColor.opacity(0.5) : Color.primary.opacity(0.08), lineWidth: isSelected ? 1.5 : 0.5)
-            )
+        .onChange(of: date) { _, newDate in
+            let newText = Self.displayFormatter.string(from: newDate)
+            if newText != text { text = newText }
         }
-        .buttonStyle(.plain)
+    }
+
+    private func parseAndApply(_ input: String) {
+        let trimmed = input.trimmingCharacters(in: .whitespaces)
+        guard !trimmed.isEmpty else { isValid = false; return }
+        for formatter in Self.inputFormatters {
+            if let parsed = formatter.date(from: trimmed) {
+                isValid = true
+                date = parsed
+                return
+            }
+        }
+        isValid = false
     }
 }

@@ -15,7 +15,7 @@ final class ThumbnailService: @unchecked Sendable {
     private let cache = NSCache<NSString, NSImage>()
     private let workQueue = DispatchQueue(label: "com.swiftcull.thumbnail.work", qos: .userInitiated, attributes: .concurrent)
     private let stateQueue = DispatchQueue(label: "com.swiftcull.thumbnail.state")
-    private let generationSemaphore = DispatchSemaphore(value: 8)
+    private let generationSemaphore = DispatchSemaphore(value: 4)
     private var inProgress: [String: PendingRequest] = [:]
     private var generation = 0
 
@@ -83,13 +83,6 @@ final class ThumbnailService: @unchecked Sendable {
             generation += 1
             inProgress.removeAll()
         }
-    }
-
-    func clearCache() {
-        cancelPending()
-        cache.removeAllObjects()
-        try? fileManager.removeItem(at: diskCacheDir)
-        try? fileManager.createDirectory(at: diskCacheDir, withIntermediateDirectories: true)
     }
 
     func clearInMemoryCache() {
@@ -283,12 +276,38 @@ final class ThumbnailService: @unchecked Sendable {
         let generator = AVAssetImageGenerator(asset: asset)
         generator.appliesPreferredTrackTransform = true
         generator.maximumSize = CGSize(width: maxSize * 2, height: maxSize * 2)
+        generator.requestedTimeToleranceBefore = CMTime(seconds: 2, preferredTimescale: 600)
+        generator.requestedTimeToleranceAfter = CMTime(seconds: 2, preferredTimescale: 600)
 
-        let time = CMTime(seconds: 0.5, preferredTimescale: 600)
-        guard let cgImage = try? generator.copyCGImage(at: time, actualTime: nil) else {
-            return nil
+        // Try 0.5s first, then fallback to 0s (first frame)
+        let times = [
+            CMTime(seconds: 0.5, preferredTimescale: 600),
+            CMTime(seconds: 0, preferredTimescale: 600)
+        ]
+
+        for time in times {
+            do {
+                var actualTime = CMTime.zero
+                let cgImage = try generator.copyCGImage(at: time, actualTime: &actualTime)
+                return NSImage(cgImage: cgImage, size: NSSize(width: cgImage.width, height: cgImage.height))
+            } catch {
+                continue
+            }
         }
 
-        return NSImage(cgImage: cgImage, size: NSSize(width: cgImage.width, height: cgImage.height))
+        // Last resort: use QuickLook thumbnail
+        let options: [CFString: Any] = [
+            kCGImageSourceThumbnailMaxPixelSize: Int(maxSize * 2),
+            kCGImageSourceCreateThumbnailFromImageIfAbsent: true,
+            kCGImageSourceCreateThumbnailWithTransform: true,
+            kCGImageSourceShouldCache: false,
+            kCGImageSourceShouldCacheImmediately: true
+        ]
+        if let source = CGImageSourceCreateWithURL(url as CFURL, nil),
+           let cgImage = CGImageSourceCreateThumbnailAtIndex(source, 0, options as CFDictionary) {
+            return NSImage(cgImage: cgImage, size: NSSize(width: cgImage.width, height: cgImage.height))
+        }
+
+        return nil
     }
 }

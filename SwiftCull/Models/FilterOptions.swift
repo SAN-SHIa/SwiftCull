@@ -60,6 +60,46 @@ enum SortOption: String, CaseIterable, Identifiable, Sendable {
     }
 }
 
+enum DatePreset: String, CaseIterable, Identifiable, Sendable {
+    case today
+    case yesterday
+    case last7Days
+    case last30Days
+    case custom
+
+    var id: String { rawValue }
+
+    var displayName: String {
+        switch self {
+        case .today: return "今天"
+        case .yesterday: return "昨天"
+        case .last7Days: return "近 7 天"
+        case .last30Days: return "近 30 天"
+        case .custom: return "自定义"
+        }
+    }
+
+    var dateRange: (start: Date, end: Date)? {
+        let cal = Calendar.current
+        let now = Date()
+        switch self {
+        case .today:
+            return (cal.startOfDay(for: now), now)
+        case .yesterday:
+            let yesterday = cal.date(byAdding: .day, value: -1, to: now)!
+            return (cal.startOfDay(for: yesterday), cal.date(bySettingHour: 23, minute: 59, second: 59, of: yesterday)!)
+        case .last7Days:
+            let start = cal.date(byAdding: .day, value: -6, to: cal.startOfDay(for: now))!
+            return (start, now)
+        case .last30Days:
+            let start = cal.date(byAdding: .day, value: -29, to: cal.startOfDay(for: now))!
+            return (start, now)
+        case .custom:
+            return nil
+        }
+    }
+}
+
 struct FilterOptions: Sendable {
     var searchText: String = ""
     var ratingFilter: RatingFilter = .all
@@ -67,6 +107,10 @@ struct FilterOptions: Sendable {
     var tagFilter: String? = nil
     var sortOption: SortOption = .date
     var sortAscending: Bool = false
+    var startDate: Date? = nil
+    var endDate: Date? = nil
+    var dateFilterEnabled: Bool = false
+    var activePreset: DatePreset? = nil
 
     var exportFileNameSuffix: String {
         var parts: [String] = []
