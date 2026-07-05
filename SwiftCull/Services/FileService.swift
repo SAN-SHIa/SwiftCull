@@ -6,10 +6,23 @@ final class FileService: @unchecked Sendable {
 
     private init() {}
 
-    func scanDirectory(at path: String) async -> [PhotoEntry] {
+    /// 快速扫描：仅列出文件并按文件名分组，使用文件系统日期，立即可用于展示。
+    /// EXIF 拍摄日期由 captureDate(for:) 在后台补充。
+    func scanFilesFast(at path: String) async -> [PhotoEntry] {
         await Task.detached(priority: .userInitiated) {
-            await Self.scanDirectorySync(at: path)
+            Self.scanFilesFastSync(at: path)
         }.value
+    }
+
+    /// 读取单张照片代表文件的 EXIF 拍摄日期（优先 JPG，其次 RAW；视频返回 nil）。
+    nonisolated static func captureDate(for photo: PhotoEntry) -> Date? {
+        if let jpg = photo.jpgPath {
+            return readCaptureDate(from: jpg, fileExtension: (jpg as NSString).pathExtension.lowercased())
+        }
+        if let nef = photo.nefPath {
+            return readCaptureDate(from: nef, fileExtension: (nef as NSString).pathExtension.lowercased())
+        }
+        return nil
     }
 
     private static let exifDateFormatter: DateFormatter = {
@@ -26,7 +39,7 @@ final class FileService: @unchecked Sendable {
         return f
     }()
 
-    private static func scanDirectorySync(at path: String) async -> [PhotoEntry] {
+    private static func scanFilesFastSync(at path: String) -> [PhotoEntry] {
         let fileManager = FileManager.default
 
         let fileURLs: [URL]
@@ -43,20 +56,10 @@ final class FileService: @unchecked Sendable {
 
         let imageExtensions: Set<String> = ["jpg", "jpeg", "nef", "cr2", "arw", "dng", "raf", "tiff", "tif"]
         let videoExtensions: Set<String> = ["mov", "mp4", "avi"]
-        let metadataExtensions: Set<String> = ["jpg", "jpeg", "nef", "cr2", "arw", "dng", "raf", "tiff", "tif"]
 
-        // Phase 1: Fast scan - collect file info using resource values only
-        struct FileEntry {
-            let baseName: String
-            let ext: String
-            let path: String
-            let fileSize: Int64?
-            let creationDate: Date?
-            let modDate: Date?
-        }
-
-        var fileEntries: [FileEntry] = []
-        fileEntries.reserveCapacity(fileURLs.count)
+        // 按文件名分组；仅使用文件系统日期占位，EXIF 拍摄日期稍后在后台补充
+        var photoDict: [String: PhotoFileGroup] = [:]
+        photoDict.reserveCapacity(fileURLs.count)
 
         for fileURL in fileURLs {
             let ext = fileURL.pathExtension.lowercased()
@@ -65,78 +68,27 @@ final class FileService: @unchecked Sendable {
             guard let rv = try? fileURL.resourceValues(forKeys: [.isRegularFileKey, .fileSizeKey, .creationDateKey, .contentModificationDateKey]),
                   rv.isRegularFile != false else { continue }
 
-            fileEntries.append(FileEntry(
-                baseName: fileURL.deletingPathExtension().lastPathComponent,
-                ext: ext,
-                path: fileURL.path,
-                fileSize: rv.fileSize.map { Int64($0) },
-                creationDate: rv.creationDate,
-                modDate: rv.contentModificationDate
-            ))
-        }
+            let baseName = fileURL.deletingPathExtension().lastPathComponent
+            let fileSize = rv.fileSize.map { Int64($0) }
+            let fsDate = rv.creationDate ?? rv.contentModificationDate
 
-        // Phase 2: Parallel EXIF reading for image files only
-        struct ExifResult: Sendable {
-            let index: Int
-            let date: Date?
-        }
-
-        let imageIndices = fileEntries.indices.filter { metadataExtensions.contains(fileEntries[$0].ext) }
-        let entriesForExif = imageIndices.map { fileEntries[$0] }
-
-        var exifDates: [Int: Date?] = [:]
-        exifDates.reserveCapacity(imageIndices.count)
-
-        await withTaskGroup(of: ExifResult.self) { group in
-            for (iteration, fileEntry) in entriesForExif.enumerated() {
-                let path = fileEntry.path
-                let ext = fileEntry.ext
-                let originalIndex = imageIndices[iteration]
-                group.addTask(priority: .userInitiated) {
-                    let date = readCaptureDate(from: path, fileExtension: ext)
-                    return ExifResult(index: originalIndex, date: date)
-                }
-            }
-            for await result in group {
-                exifDates[result.index] = result.date
-            }
-        }
-
-        // Phase 3: Build photo dictionary
-        var photoDict: [String: PhotoFileGroup] = [:]
-
-        for (index, entry) in fileEntries.enumerated() {
-            let captureDate = exifDates[index] ?? nil ?? entry.creationDate ?? entry.modDate
-
-            if photoDict[entry.baseName] == nil {
-                photoDict[entry.baseName] = PhotoFileGroup()
-            }
-
-            var group = photoDict[entry.baseName]!
-
-            switch entry.ext {
-            case "jpg", "jpeg":
-                group.jpgPath = entry.path
-                group.jpgSize = entry.fileSize
-                group.updateCaptureDate(captureDate, priority: 3)
+            var group = photoDict[baseName] ?? PhotoFileGroup()
+            switch ext {
+            case "jpg", "jpeg", "tiff", "tif":
+                group.jpgPath = fileURL.path
+                group.jpgSize = fileSize
             case "nef", "cr2", "arw", "dng", "raf":
-                group.nefPath = entry.path
-                group.nefSize = entry.fileSize
-                group.updateCaptureDate(captureDate, priority: 2)
-            case "tiff", "tif":
-                group.jpgPath = entry.path
-                group.jpgSize = entry.fileSize
-                group.updateCaptureDate(captureDate, priority: 3)
+                group.nefPath = fileURL.path
+                group.nefSize = fileSize
             case "mov", "mp4", "avi":
-                group.movPath = entry.path
-                group.movSize = entry.fileSize
-                group.updateCaptureDate(captureDate, priority: 1)
+                group.movPath = fileURL.path
+                group.movSize = fileSize
             default:
                 break
             }
-
-            group.updateModificationDate(entry.modDate)
-            photoDict[entry.baseName] = group
+            group.updateCaptureDate(fsDate, priority: 0)
+            group.updateModificationDate(rv.contentModificationDate)
+            photoDict[baseName] = group
         }
 
         var entries: [PhotoEntry] = []
@@ -232,7 +184,8 @@ final class FileService: @unchecked Sendable {
 
     private static func readCaptureDate(from path: String, fileExtension: String) -> Date? {
         let url = URL(fileURLWithPath: path)
-        guard let source = CGImageSourceCreateWithURL(url as CFURL, nil),
+        let sourceOptions: [CFString: Any] = [kCGImageSourceShouldCache: false]
+        guard let source = CGImageSourceCreateWithURL(url as CFURL, sourceOptions as CFDictionary),
               let properties = CGImageSourceCopyPropertiesAtIndex(source, 0, nil) as? [CFString: Any] else {
             return nil
         }

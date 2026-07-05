@@ -17,8 +17,12 @@ struct AsyncThumbnailView: View {
     @State private var image: NSImage?
     @State private var loadTask: Task<Void, Never>?
 
+    private var renderSize: CGFloat {
+        CGFloat(ThumbnailService.quantizedSize(size))
+    }
+
     private var cacheId: String {
-        "\(imagePath)|\(Int(size.rounded()))"
+        "\(imagePath)|\(ThumbnailService.quantizedSize(size))"
     }
 
     var body: some View {
@@ -66,8 +70,8 @@ struct AsyncThumbnailView: View {
             loadTask = nil
         }
         .onChange(of: cacheId) { _, _ in
+            // 保留旧缩略图，待新尺寸就绪后再替换，缩放时不闪烁
             loadTask?.cancel()
-            image = nil
             loadThumbnail()
         }
     }
@@ -85,7 +89,7 @@ struct AsyncThumbnailView: View {
 
         let requestCacheId = cacheId
         let requestPath = imagePath
-        let requestSize = size
+        let requestSize = renderSize
         loadTask = Task { @MainActor in
             let newImage = await service.thumbnail(path: requestPath, id: requestCacheId, size: requestSize)
             guard !Task.isCancelled else { return }
