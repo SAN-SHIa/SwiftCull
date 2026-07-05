@@ -603,11 +603,17 @@ struct PhotoGridContent: View {
                     .contentShape(Rectangle())
                     .simultaneousGesture(selectionDragGesture)
                     .onPreferenceChange(PhotoItemFramePreferenceKey.self) { frames in
+                        let latest: [String: CGRect]
                         if dragStart == nil {
                             itemFrames = frames
+                            latest = frames
                         } else {
                             itemFrames.merge(frames, uniquingKeysWith: { _, new in new })
+                            latest = itemFrames
                             updateDragSelection()
+                        }
+                        if let count = columnCount(from: latest) {
+                            store.updateGridColumnCount(count)
                         }
                     }
                 }
@@ -793,13 +799,26 @@ struct PhotoGridContent: View {
     }
 
     private func updateGridColumnCount(width: CGFloat) {
-        // 必须与 .adaptive 网格实际排布的列数一致，否则上/下键跨行跳转会错位。
+        // 初始估算（帧尚未就绪时的兜底）。稳态下由 columnCount(from:) 依据实际布局帧校正。
         // 可用宽度 = 总宽 - ScrollView 水平内边距(14×2) - LazyVGrid 内边距(4×2)
         let horizontalInset: CGFloat = 14 * 2 + 4 * 2
         let columnSpacing: CGFloat = 4
         let available = max(0, width - horizontalInset)
         let count = max(1, Int((available + columnSpacing) / (gridSize + columnSpacing)))
         store.updateGridColumnCount(count)
+    }
+
+    /// 根据照片卡片的实际布局帧推断每行列数：把处于同一行（minY 相同）的卡片计数，
+    /// 取所有行中的最大值即为满行列数。比按宽度估算精确，免疫内边距/滚动条等差异，
+    /// 从而保证方向键上/下在任意网格尺寸下都精准跨行。
+    private func columnCount(from frames: [String: CGRect]) -> Int? {
+        guard !frames.isEmpty else { return nil }
+        var perRow: [Int: Int] = [:]
+        for rect in frames.values {
+            let rowKey = Int(rect.minY.rounded())
+            perRow[rowKey, default: 0] += 1
+        }
+        return perRow.values.max()
     }
 
     private func handleTap(photo: PhotoEntry) {
