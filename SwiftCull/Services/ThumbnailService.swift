@@ -33,6 +33,14 @@ final class ThumbnailService: @unchecked Sendable {
         try? fileManager.createDirectory(at: diskCacheDir, withIntermediateDirectories: true)
     }
 
+    /// 将显示尺寸量化到固定台阶，使缩放网格时缩略图请求的缓存 key 保持稳定，
+    /// 避免每变化 1pt 就重新生成缩略图导致的卡顿与闪烁。
+    static func quantizedSize(_ size: CGFloat) -> Int {
+        let step = 32
+        let steps = max(2, Int((size / CGFloat(step)).rounded(.up)))
+        return steps * step
+    }
+
     func getCached(_ id: String) -> NSImage? {
         cache.object(forKey: id as NSString)
     }

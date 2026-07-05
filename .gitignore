@@ -4,6 +4,7 @@ DerivedData/
 *.xcuserstate
 xcuserdata/
 *.xcworkspace/xcuserdata/
+*.xcodeproj/
 
 # macOS
 .DS_Store

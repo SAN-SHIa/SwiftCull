@@ -26,6 +26,9 @@ class PhotoStore: ObservableObject {
     @Published var isLoading = false
     @Published var loadingProgress: Double = 0
     @Published var loadingStatus: String = ""
+    @Published var isEnriching = false
+    @Published var enrichProgress: Double = 0
+    @Published var enrichStatus: String = ""
     @Published var sourcePath: String = ""
     @Published var errorMessage: String?
     @Published var showingDeleteConfirmation = false
@@ -118,6 +121,9 @@ class PhotoStore: ObservableObject {
         isSelectMode = false
         editedOriginals = [:]
         viewMode = .grid
+        isEnriching = false
+        enrichProgress = 0
+        enrichStatus = ""
 
         if sourcePath.isEmpty {
             photos = []
@@ -129,9 +135,6 @@ class PhotoStore: ObservableObject {
             return
         }
 
-        loadingStatus = "正在扫描照片文件..."
-        loadingProgress = 0.08
-
         var isDir: ObjCBool = false
         if !FileManager.default.fileExists(atPath: sourcePath, isDirectory: &isDir) || !isDir.boolValue {
             errorMessage = "路径不存在或不是文件夹: \(sourcePath)"
@@ -141,89 +144,134 @@ class PhotoStore: ObservableObject {
             return
         }
 
-        let loaded = await fileService.scanDirectory(at: sourcePath)
-        guard currentLoadID == loadID else {
-            isLoading = false
-            return
-        }
+        loadingStatus = "正在扫描照片文件..."
+        loadingProgress = 0.4
 
-        var enriched: [PhotoEntry] = []
-        enriched.reserveCapacity(loaded.count)
+        // 第一阶段：快速列出文件（文件系统日期），立即展示网格
+        let fast = await fileService.scanFilesFast(at: sourcePath)
+        guard currentLoadID == loadID else { isLoading = false; return }
 
-        if loaded.isEmpty {
-            loadingStatus = "未找到可识别的照片"
-            loadingProgress = 1
-        } else {
-            loadingStatus = "正在读取评分与 Finder 标签..."
-            loadingProgress = 0.2
-
-            let chunkSize = 200
-            let chunkCount = (loaded.count + chunkSize - 1) / chunkSize
-            var chunkResults = Array<[PhotoEntry]?>(repeating: nil, count: chunkCount)
-            var completedCount = 0
-
-            await withTaskGroup(of: (Int, [PhotoEntry]).self) { group in
-                for chunkIndex in 0..<chunkCount {
-                    let startIndex = chunkIndex * chunkSize
-                    let endIndex = min(startIndex + chunkSize, loaded.count)
-                    let chunk = Array(loaded[startIndex..<endIndex])
-
-                    group.addTask(priority: .userInitiated) {
-                        let ratingService = RatingService.shared
-                        let tagService = TagService.shared
-                        let partial = chunk.map { entry -> PhotoEntry in
-                            var photo = entry
-                            photo.rating = ratingService.getRating(for: photo.id)
-                            photo.tags = tagService.getTagsForPhotoPair(photo)
-                            return photo
-                        }
-                        return (chunkIndex, partial)
-                    }
-                }
-
-                for await (chunkIndex, partial) in group {
-                    guard currentLoadID == loadID else { break }
-                    chunkResults[chunkIndex] = partial
-                    completedCount += 1
-                    loadingProgress = 0.2 + 0.65 * (Double(completedCount) / Double(chunkCount))
-                    loadingStatus = "正在读取评分与 Finder 标签 \(min(completedCount * chunkSize, loaded.count))/\(loaded.count)"
-                }
-            }
-
-            // If load was cancelled during task group, exit early
-            guard currentLoadID == loadID else {
-                isLoading = false
-                return
-            }
-
-            for chunk in chunkResults {
-                if let chunk { enriched.append(contentsOf: chunk) }
-            }
-        }
-
-        loadingStatus = "正在加载项目标注..."
-        loadingProgress = 0.88
-
-        // 加载 sidecar 标注（星级）
+        // 立即读取评分（UserDefaults，很快）与 sidecar 星级，让网格第一时间可用
         sidecarEntries = projectMetadata.load(from: sourcePath)
-        if !sidecarEntries.isEmpty {
-            for i in enriched.indices {
-                let id = enriched[i].id
-                if let meta = sidecarEntries[id] {
-                    if let r = meta.rating, r > 0 {
-                        enriched[i].rating = r
-                    }
-                }
+        var initial = fast
+        for i in initial.indices {
+            initial[i].rating = ratingService.getRating(for: initial[i].id)
+            if let meta = sidecarEntries[initial[i].id], let r = meta.rating, r > 0 {
+                initial[i].rating = r
             }
         }
 
-        loadingStatus = "正在整理排序..."
-        loadingProgress = 0.9
-        photos = enriched
+        photos = initial
         applyFilters()
         loadingProgress = 1
-        loadingStatus = "加载完成"
+        loadingStatus = fast.isEmpty ? "未找到可识别的照片" : "加载完成"
         isLoading = false
+
+        guard !fast.isEmpty else { return }
+
+        // 第二阶段：后台补充 EXIF 拍摄日期与 Finder 标签，完成后按拍摄日期平滑重排
+        await enrichPhotos(loadID: loadID)
+    }
+
+    /// 后台补充拍摄日期与标签，带细粒度进度；完成后按最终拍摄日期重排
+    private func enrichPhotos(loadID: UUID) async {
+        let snapshot = photos
+        let total = snapshot.count
+        guard total > 0 else { return }
+
+        isEnriching = true
+        enrichProgress = 0
+        enrichStatus = "正在读取拍摄信息…"
+
+        struct EnrichResult: Sendable {
+            let id: String
+            let captureDate: Date?
+            let tags: [String]
+        }
+
+        let chunkSize = 100
+        let chunkCount = (total + chunkSize - 1) / chunkSize
+        var chunkResults = Array<[EnrichResult]?>(repeating: nil, count: chunkCount)
+        var completedCount = 0
+
+        await withTaskGroup(of: (Int, [EnrichResult]).self) { group in
+            for chunkIndex in 0..<chunkCount {
+                let startIndex = chunkIndex * chunkSize
+                let endIndex = min(startIndex + chunkSize, total)
+                let chunk = Array(snapshot[startIndex..<endIndex])
+                group.addTask(priority: .userInitiated) {
+                    let tagService = TagService.shared
+                    let partial = chunk.map { photo in
+                        EnrichResult(
+                            id: photo.id,
+                            captureDate: FileService.captureDate(for: photo),
+                            tags: tagService.getTagsForPhotoPair(photo)
+                        )
+                    }
+                    return (chunkIndex, partial)
+                }
+            }
+
+            for await (chunkIndex, partial) in group {
+                guard currentLoadID == loadID else { break }
+                chunkResults[chunkIndex] = partial
+                completedCount += 1
+                enrichProgress = Double(completedCount) / Double(chunkCount)
+                enrichStatus = "正在读取拍摄信息 \(min(completedCount * chunkSize, total))/\(total)"
+            }
+        }
+
+        guard currentLoadID == loadID else { isEnriching = false; return }
+
+        var dateMap: [String: Date] = [:]
+        var tagMap: [String: [String]] = [:]
+        for chunk in chunkResults {
+            guard let chunk else { continue }
+            for r in chunk {
+                if let d = r.captureDate { dateMap[r.id] = d }
+                tagMap[r.id] = r.tags
+            }
+        }
+
+        var rebuilt: [PhotoEntry] = []
+        rebuilt.reserveCapacity(photos.count)
+        for photo in photos {
+            let exifDate = dateMap[photo.id]
+            let needsRebuild = exifDate != nil && exifDate != photo.fileDate
+            var updated: PhotoEntry
+            if needsRebuild {
+                updated = PhotoEntry(
+                    baseName: photo.baseName,
+                    jpgPath: photo.jpgPath,
+                    nefPath: photo.nefPath,
+                    movPath: photo.movPath,
+                    jpgFileSize: photo.jpgFileSize,
+                    nefFileSize: photo.nefFileSize,
+                    movFileSize: photo.movFileSize,
+                    fileDate: exifDate!,
+                    modificationDate: photo.modificationDate
+                )
+                updated.rating = photo.rating
+                updated.tags = photo.tags
+                updated.isDeleted = photo.isDeleted
+            } else {
+                updated = photo
+            }
+            // 标签：未处于用户编辑中的照片，采用磁盘读取的最新标签
+            if editedOriginals[photo.id] == nil, let tags = tagMap[photo.id] {
+                updated.tags = tags
+            }
+            rebuilt.append(updated)
+        }
+
+        photos = rebuilt
+        withAnimation(.snappy(duration: 0.3)) {
+            applyFilters()
+        }
+
+        enrichProgress = 1
+        enrichStatus = ""
+        isEnriching = false
     }
 
     // MARK: - Sidecar 标注同步
@@ -243,7 +291,7 @@ class PhotoStore: ObservableObject {
 
     func preloadThumbnails(around photo: PhotoEntry, size: CGFloat) {
         guard let centerIndex = filteredPhotos.firstIndex(where: { $0.id == photo.id }) else { return }
-        let quantizedSize = Int(size.rounded())
+        let quantizedSize = ThumbnailService.quantizedSize(size)
         let key = "\(photo.id)|\(quantizedSize)|\(gridColumnCount)"
         guard key != lastPreheatKey else { return }
         lastPreheatKey = key
@@ -256,7 +304,7 @@ class PhotoStore: ObservableObject {
         let items = filteredPhotos[lowerBound..<upperBound].map { photo in
             (id: "\(photo.primaryFilePath)|\(quantizedSize)", path: photo.primaryFilePath)
         }
-        thumbnailService.preloadThumbnails(paths: items, size: size)
+        thumbnailService.preloadThumbnails(paths: items, size: CGFloat(quantizedSize))
     }
 
     func applyFilters() {

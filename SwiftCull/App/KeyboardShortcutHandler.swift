@@ -115,6 +115,12 @@ enum KeyboardShortcutHandler {
             case "e":
                 store.toggleSinglePreview()
                 return true
+            case "q":
+                if store.isSelectMode {
+                    store.confirmSelectMode()
+                    return true
+                }
+                return false
             case "a":
                 store.selectAll()
                 return true

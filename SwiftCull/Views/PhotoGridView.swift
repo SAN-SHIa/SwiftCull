@@ -34,6 +34,7 @@ struct PhotoGridView: View {
     @EnvironmentObject var store: PhotoStore
     @State private var gridSize: CGFloat = 110
     @State private var lastSelectedPhoto: PhotoEntry?
+    @State private var baseGridSize: CGFloat?
     @State private var groupingMode: PhotoGroupingMode = .all
     private let minGridSize: CGFloat = 80
     private let maxGridSize: CGFloat = 220
@@ -42,6 +43,19 @@ struct PhotoGridView: View {
 
     private var columns: [GridItem] {
         [GridItem(.adaptive(minimum: gridSize, maximum: gridSize + 50), spacing: 4)]
+    }
+
+    /// 触控板捏合缩放照片网格：以手势开始时的尺寸为基准按比例缩放，实时更新缩略图大小。
+    private var magnifyGesture: some Gesture {
+        MagnifyGesture()
+            .onChanged { value in
+                let base = baseGridSize ?? gridSize
+                if baseGridSize == nil { baseGridSize = base }
+                gridSize = min(max(base * value.magnification, minGridSize), maxGridSize)
+            }
+            .onEnded { _ in
+                baseGridSize = nil
+            }
     }
 
     var body: some View {
@@ -63,10 +77,20 @@ struct PhotoGridView: View {
                 Divider()
             }
 
+            ShortcutHintBar()
+
+            if store.isEnriching {
+                EnrichProgressBar()
+            }
+
+            Divider()
+
             photoContent
+                .simultaneousGesture(magnifyGesture)
         }
         .animation(.snappy(duration: 0.24), value: store.isSelectMode)
         .animation(.snappy(duration: 0.2), value: store.selectedCount)
+        .animation(.snappy(duration: 0.24), value: store.isEnriching)
     }
 
     @ViewBuilder
@@ -530,6 +554,7 @@ struct PhotoGridContent: View {
     @State private var dragSelectionMode: DragSelectionMode = .replace
     @State private var cachedPhotoIds: Set<String> = []
     @State private var lastDragUpdateTime: CFAbsoluteTime = 0
+    @State private var didDragSelect = false
 
     private let gridCoordinateSpace = "photo-grid-space"
 
@@ -594,6 +619,7 @@ struct PhotoGridContent: View {
                         }
                     }
                     .padding(4)
+                    .frame(minHeight: geometry.size.height, alignment: .topLeading)
                     .coordinateSpace(name: gridCoordinateSpace)
                     .overlay(alignment: .topLeading) {
                         if let selectionRect {
@@ -601,7 +627,7 @@ struct PhotoGridContent: View {
                         }
                     }
                     .contentShape(Rectangle())
-                    .simultaneousGesture(selectionDragGesture)
+                    .simultaneousGesture(gridInteractionGesture)
                     .onPreferenceChange(PhotoItemFramePreferenceKey.self) { frames in
                         let latest: [String: CGRect]
                         if dragStart == nil {
@@ -661,9 +687,6 @@ struct PhotoGridContent: View {
         .id(photo.id)
         .onAppear {
             store.preloadThumbnails(around: photo, size: gridSize)
-        }
-        .onTapGesture {
-            handleTap(photo: photo)
         }
         .background(
             GeometryReader { itemGeometry in
@@ -735,10 +758,23 @@ struct PhotoGridContent: View {
         }
     }
 
-    private var selectionDragGesture: some Gesture {
-        DragGesture(minimumDistance: 6, coordinateSpace: .named(gridCoordinateSpace))
+    /// 命中反查：点击落点对应的照片
+    private func handleTap(at point: CGPoint) {
+        guard let id = itemFrames.first(where: { $0.value.contains(point) })?.key,
+              let photo = store.filteredPhotos.first(where: { $0.id == id }) else { return }
+        handleTap(photo: photo)
+    }
+
+    /// 统一的网格交互手势：同一个手势同时处理「点击选中」与「拖拽框选」，
+    /// 从根本上避免与卡片点击竞争。位移超过阈值判定为框选，否则松手时按点击处理。
+    private var gridInteractionGesture: some Gesture {
+        DragGesture(minimumDistance: 0, coordinateSpace: .named(gridCoordinateSpace))
             .onChanged { value in
-                if dragStart == nil {
+                if !didDragSelect {
+                    let dx = value.location.x - value.startLocation.x
+                    let dy = value.location.y - value.startLocation.y
+                    guard dx * dx + dy * dy >= 36 else { return }
+                    didDragSelect = true
                     dragStart = value.startLocation
                     dragBaselineSelection = store.selectedPhotos
                     dragSelectionMode = currentDragSelectionMode
@@ -747,10 +783,18 @@ struct PhotoGridContent: View {
                 dragCurrent = value.location
                 updateDragSelection()
             }
-            .onEnded { _ in
-                updateDragSelection()
+            .onEnded { value in
+                if didDragSelect {
+                    updateDragSelection(force: true)
+                    if store.selectedCount > 0, !store.isSelectMode {
+                        store.enterSelectMode()
+                    }
+                } else {
+                    handleTap(at: value.startLocation)
+                }
                 dragStart = nil
                 dragCurrent = nil
+                didDragSelect = false
                 dragBaselineSelection = []
                 dragSelectionMode = .replace
             }
@@ -767,11 +811,13 @@ struct PhotoGridContent: View {
         return .replace
     }
 
-    private func updateDragSelection() {
+    private func updateDragSelection(force: Bool = false) {
         guard let selectionRect else { return }
 
         let now = CFAbsoluteTimeGetCurrent()
-        guard now - lastDragUpdateTime >= 0.016 else { return }
+        if !force {
+            guard now - lastDragUpdateTime >= 0.016 else { return }
+        }
         lastDragUpdateTime = now
 
         let rectSelectedIds = itemFrames.reduce(into: Set<String>()) { result, item in
@@ -792,7 +838,6 @@ struct PhotoGridContent: View {
         }
 
         store.selectPhotoIds(selectedIds)
-        activateSelectModeIfNeeded()
         if let selected = store.selectedPhoto {
             lastSelectedPhoto = selected
         }
