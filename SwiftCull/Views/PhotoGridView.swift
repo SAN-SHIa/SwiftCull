@@ -32,17 +32,17 @@ enum PhotoSelectionScope {
 
 struct PhotoGridView: View {
     @EnvironmentObject var store: PhotoStore
-    @State private var gridSize: CGFloat = 110
+    @AppStorage("photoGridSize") private var gridSize: Double = 110
+    @AppStorage("photoGroupingMode") private var groupingMode: PhotoGroupingMode = .all
     @State private var lastSelectedPhoto: PhotoEntry?
-    @State private var baseGridSize: CGFloat?
-    @State private var groupingMode: PhotoGroupingMode = .all
-    private let minGridSize: CGFloat = 80
-    private let maxGridSize: CGFloat = 220
+    @State private var baseGridSize: Double?
+    private let minGridSize: Double = 80
+    private let maxGridSize: Double = 220
 
     private var isSelectMode: Bool { store.isSelectMode }
 
     private var columns: [GridItem] {
-        [GridItem(.adaptive(minimum: gridSize, maximum: gridSize + 50), spacing: 4)]
+        [GridItem(.adaptive(minimum: CGFloat(gridSize), maximum: CGFloat(gridSize) + 50), spacing: 4)]
     }
 
     /// 触控板捏合缩放照片网格：以手势开始时的尺寸为基准按比例缩放，实时更新缩略图大小。
@@ -51,7 +51,7 @@ struct PhotoGridView: View {
             .onChanged { value in
                 let base = baseGridSize ?? gridSize
                 if baseGridSize == nil { baseGridSize = base }
-                gridSize = min(max(base * value.magnification, minGridSize), maxGridSize)
+                gridSize = min(max(base * Double(value.magnification), minGridSize), maxGridSize)
             }
             .onEnded { _ in
                 baseGridSize = nil
@@ -108,7 +108,7 @@ struct PhotoGridView: View {
         } else {
             PhotoGridContent(
                 store: store,
-                gridSize: gridSize,
+                gridSize: CGFloat(gridSize),
                 columns: columns,
                 groupingMode: groupingMode,
                 isSelectMode: store.isSelectMode,
@@ -649,11 +649,9 @@ struct PhotoGridContent: View {
                     cachedPhotoIds = Set(store.filteredPhotos.map(\.id))
                 }
                 .onChange(of: geometry.size.width) { _, width in
-                    itemFrames = [:]
                     updateGridColumnCount(width: width)
                 }
                 .onChange(of: gridSize) { _, _ in
-                    itemFrames = [:]
                     updateGridColumnCount(width: geometry.size.width)
                 }
                 .onChange(of: store.filteredPhotosVersion) { _, _ in

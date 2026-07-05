@@ -6,12 +6,12 @@ struct FilterSidebar: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             ScrollView {
-                VStack(alignment: .leading, spacing: 12) {
+                VStack(alignment: .leading, spacing: 10) {
                     searchSection
+                    dateFilterSection
                     ratingSection
                     tagSection
                     fileTypeSection
-                    dateFilterSection
                     sortSection
                 }
                 .padding(.horizontal, 12)

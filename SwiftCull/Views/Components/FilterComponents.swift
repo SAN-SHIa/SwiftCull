@@ -5,13 +5,13 @@ struct GlassCard<Content: View>: View {
 
     var body: some View {
         content()
-            .padding(12)
-            .background(.ultraThinMaterial)
-            .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+            .padding(11)
+            .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
             .overlay(
-                RoundedRectangle(cornerRadius: 14, style: .continuous)
-                    .strokeBorder(Color.primary.opacity(0.06), lineWidth: 0.5)
+                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                    .strokeBorder(Color.primary.opacity(0.05), lineWidth: 0.5)
             )
+            .shadow(color: .black.opacity(0.03), radius: 1.5, y: 1)
     }
 }
 
