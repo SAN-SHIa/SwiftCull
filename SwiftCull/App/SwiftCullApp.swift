@@ -70,6 +70,7 @@ struct SwiftCullApp: App {
         }
     }
 
+    @MainActor
     private func setupKeyboardMonitor() {
         guard eventMonitor == nil else { return }
         eventMonitor = KeyboardShortcutHandler.setupMonitor(for: store)

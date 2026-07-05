@@ -85,13 +85,6 @@ final class ThumbnailService: @unchecked Sendable {
         }
     }
 
-    func clearCache() {
-        cancelPending()
-        cache.removeAllObjects()
-        try? fileManager.removeItem(at: diskCacheDir)
-        try? fileManager.createDirectory(at: diskCacheDir, withIntermediateDirectories: true)
-    }
-
     func clearInMemoryCache() {
         cache.removeAllObjects()
     }

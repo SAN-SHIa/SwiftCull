@@ -53,16 +53,20 @@ struct PhotoGridView: View {
 
             Divider()
 
-            selectionCommandPanel
-                .padding(.horizontal, 22)
-                .padding(.vertical, 8)
-                .background(.bar)
+            if store.isSelectMode {
+                selectionCommandPanel
+                    .padding(.horizontal, 22)
+                    .padding(.vertical, 8)
+                    .background(.bar)
+                    .transition(.move(edge: .top).combined(with: .opacity))
 
-            Divider()
+                Divider()
+            }
 
             photoContent
         }
-        .animation(.snappy(duration: 0.24), value: store.selectedCount)
+        .animation(.snappy(duration: 0.24), value: store.isSelectMode)
+        .animation(.snappy(duration: 0.2), value: store.selectedCount)
     }
 
     @ViewBuilder
@@ -247,8 +251,6 @@ struct PhotoGridView: View {
             }
             .buttonStyle(SelectionSecondaryButtonStyle())
             .disabled(!isSelectMode)
-
-            selectionScopeMenu(width: 30)
         }
     }
 
@@ -279,8 +281,6 @@ struct PhotoGridView: View {
             .buttonStyle(SelectionIconButtonStyle(width: 28, height: 28))
             .disabled(!isSelectMode)
             .help("取消")
-
-            selectionScopeMenu(width: 28)
         }
     }
 
@@ -422,36 +422,6 @@ struct PhotoGridView: View {
         }
         .buttonStyle(SelectionDestructiveButtonStyle())
         .disabled(store.selectedCount == 0)
-    }
-
-    private func selectionScopeMenu(width: CGFloat) -> some View {
-        Menu {
-            Button {
-                selectPhotos(.all)
-            } label: {
-                Label("所有照片", systemImage: "photo.stack")
-            }
-
-            Button {
-                selectPhotos(.month)
-            } label: {
-                Label("当前月份", systemImage: "calendar")
-            }
-            .disabled(selectionReferencePhoto == nil)
-
-            Button {
-                selectPhotos(.day)
-            } label: {
-                Label("当前日期", systemImage: "calendar.day.timeline.left")
-            }
-            .disabled(selectionReferencePhoto == nil)
-        } label: {
-            Image(systemName: "checkmark.square")
-                .font(.system(size: 14, weight: .medium))
-        }
-        .menuStyle(.button)
-        .buttonStyle(SelectionIconButtonStyle(width: width, height: 28))
-        .help("按范围选择")
     }
 
     private var selectionReferencePhoto: PhotoEntry? {
@@ -600,59 +570,44 @@ struct PhotoGridContent: View {
         ScrollViewReader { proxy in
             GeometryReader { geometry in
                 ScrollView {
-                    if store.aiCullService.isAnalyzing {
-                        VStack(spacing: 10) {
-                            ProgressView(value: store.aiCullService.progress)
-                                .tint(Color.accentColor)
-                            Text(store.aiCullService.statusText)
-                                .font(.callout)
-                                .foregroundStyle(.secondary)
-                            Text("\(Int(store.aiCullService.progress * 100))%")
-                                .font(.title3.monospacedDigit())
-                                .foregroundStyle(Color.accentColor)
-                        }
-                        .frame(maxWidth: .infinity, minHeight: 220)
-                        .padding(24)
-                    } else {
-                        LazyVGrid(columns: columns, spacing: 4) {
-                            if groupingMode == .all {
-                                ForEach(store.filteredPhotos) { photo in
-                                    photoCard(photo)
-                                }
-                            } else {
-                                ForEach(photoGroups) { group in
-                                    Section {
-                                        ForEach(group.photos) { photo in
-                                            photoCard(photo)
-                                        }
-                                    } header: {
-                                        PhotoGroupHeader(
-                                            group: group,
-                                            isSelectMode: isSelectMode,
-                                            isSelected: isGroupSelected(group)
-                                        ) {
-                                            toggleGroupSelection(group)
-                                        }
+                    LazyVGrid(columns: columns, spacing: 4) {
+                        if groupingMode == .all {
+                            ForEach(store.filteredPhotos) { photo in
+                                photoCard(photo)
+                            }
+                        } else {
+                            ForEach(photoGroups) { group in
+                                Section {
+                                    ForEach(group.photos) { photo in
+                                        photoCard(photo)
+                                    }
+                                } header: {
+                                    PhotoGroupHeader(
+                                        group: group,
+                                        isSelectMode: isSelectMode,
+                                        isSelected: isGroupSelected(group)
+                                    ) {
+                                        toggleGroupSelection(group)
                                     }
                                 }
                             }
                         }
-                        .padding(4)
-                        .coordinateSpace(name: gridCoordinateSpace)
-                        .overlay(alignment: .topLeading) {
-                            if let selectionRect {
-                                selectionOverlay(for: selectionRect)
-                            }
+                    }
+                    .padding(4)
+                    .coordinateSpace(name: gridCoordinateSpace)
+                    .overlay(alignment: .topLeading) {
+                        if let selectionRect {
+                            selectionOverlay(for: selectionRect)
                         }
-                        .contentShape(Rectangle())
-                        .simultaneousGesture(selectionDragGesture)
-                        .onPreferenceChange(PhotoItemFramePreferenceKey.self) { frames in
-                            if dragStart == nil {
-                                itemFrames = frames
-                            } else {
-                                itemFrames.merge(frames, uniquingKeysWith: { _, new in new })
-                                updateDragSelection()
-                            }
+                    }
+                    .contentShape(Rectangle())
+                    .simultaneousGesture(selectionDragGesture)
+                    .onPreferenceChange(PhotoItemFramePreferenceKey.self) { frames in
+                        if dragStart == nil {
+                            itemFrames = frames
+                        } else {
+                            itemFrames.merge(frames, uniquingKeysWith: { _, new in new })
+                            updateDragSelection()
                         }
                     }
                 }
@@ -669,7 +624,7 @@ struct PhotoGridContent: View {
                     itemFrames = [:]
                     updateGridColumnCount(width: geometry.size.width)
                 }
-                .onChange(of: store.filteredPhotos.map(\.id)) { _, _ in
+                .onChange(of: store.filteredPhotosVersion) { _, _ in
                     itemFrames = [:]
                     cachedPhotoIds = Set(store.filteredPhotos.map(\.id))
                 }
@@ -677,9 +632,7 @@ struct PhotoGridContent: View {
             .onChange(of: store.selectedPhoto?.id) { _, newId in
                 guard dragStart == nil else { return }
                 if let newId = newId {
-                    withAnimation(.easeOut(duration: 0.15)) {
-                        proxy.scrollTo(newId, anchor: .center)
-                    }
+                    proxy.scrollTo(newId, anchor: .center)
                 }
             }
             .task(id: store.viewMode) {
@@ -691,10 +644,9 @@ struct PhotoGridContent: View {
     }
 
     private func photoCard(_ photo: PhotoEntry) -> some View {
-        let effectiveGridSize = store.aiCullService.isAnalyzing ? min(gridSize, 80) : gridSize
-        return SelectablePhotoCardView(
+        SelectablePhotoCardView(
             photo: photo,
-            gridSize: effectiveGridSize,
+            gridSize: gridSize,
             isSelected: store.selectedPhotos.contains(photo.id),
             isPrimary: store.selectedPhoto?.id == photo.id,
             isSelectMode: isSelectMode
@@ -841,8 +793,12 @@ struct PhotoGridContent: View {
     }
 
     private func updateGridColumnCount(width: CGFloat) {
-        let columnWidth = gridSize + 4
-        let count = max(1, Int((width + 4) / columnWidth))
+        // 必须与 .adaptive 网格实际排布的列数一致，否则上/下键跨行跳转会错位。
+        // 可用宽度 = 总宽 - ScrollView 水平内边距(14×2) - LazyVGrid 内边距(4×2)
+        let horizontalInset: CGFloat = 14 * 2 + 4 * 2
+        let columnSpacing: CGFloat = 4
+        let available = max(0, width - horizontalInset)
+        let count = max(1, Int((available + columnSpacing) / (gridSize + columnSpacing)))
         store.updateGridColumnCount(count)
     }
 

@@ -1,4 +1,5 @@
 # ⚡ SwiftCull - 照片快筛
+
 <div align="center">
   <div>
     <a href="https://github.com/SAN-SHIa/SwiftCull/releases"><img alt="GitHub Release" src="https://img.shields.io/github/v/release/SAN-SHIa/SwiftCull?style=flat-square" /></a>
@@ -9,7 +10,10 @@
   </div>
   <br>
 </div>
+
 <img src="./imgs/post.png" alt="SwiftCull" />
+
+> 一款为摄影师打造的 macOS 原生照片快速筛选工具。从 SD 卡里的数千张照片中，用最少的操作挑出该留的、删掉该删的。纯 SwiftUI + 系统原生框架，无第三方依赖。
 
 ## 📥 下载安装
 
@@ -20,16 +24,16 @@
 ## 🎯 功能特性
 
 **1. 🚀 极速筛选，告别低效**
-面对 SD 卡中数千张照片，逐张查看费时费力。SwiftCull 支持按文件类型（RAW/JPG/MOV）、评分、Finder 标签和文件名智能筛选，配合键盘方向键导航和空格键 Quick Look 预览，让你像在 Finder 中一样快速浏览，筛选效率提升数倍。拖拽框选、`⌘` 点击、`⇧` 点击多选，网格大小可调。
+按文件类型（RAW / JPG / MOV）、评分、Finder 标签、文件名与拍摄日期多维筛选，并可按「月 / 日」分组浏览。方向键导航、空格键 Quick Look，像在 Finder 里一样顺手。支持拖拽框选、`⌘` 点选、`⇧` 连选，网格大小无级调节，上下键在任意网格尺寸下都精准跨行。
 
-**2. 🤖 AI 智能筛选**
-集成 AI 照片分析能力，支持本地 Vision 框架和 LLM 云端分析两种模式。AI 可自动识别照片质量、构图、表情等维度，快速标记"保留"与"删除"建议，大幅减少人工筛选工作量。分析完成后提供 Review 界面，逐张确认 AI 建议。
+**2. 🔍 大图审片，细节尽览**
+按 `E` 进入大图模式逐张审片。支持**触控板捏合、双击、`＋ / －` 按钮缩放**（最高 6×），放大后可拖拽平移查看细节，切换照片自动复位，是判断对焦是否精准、有没有糊片的利器。
 
-**3. 🏷️ 原生标签，无缝协作**
-深度集成 macOS Finder 标签系统，自动发现你的自定义标签名称和颜色。在 SwiftCull 中标记的红色、黄色标签，在 Finder 中同样可见，反之亦然。评分与标签支持批量操作，选中多张照片一键设置，无需逐张处理。
+**3. 🏷️ 原生标签与评分**
+深度集成 macOS Finder 标签系统，自动发现你的自定义标签名称与颜色，双向可见。评分（1–5 星）与标签均支持批量操作：进入选择模式后一键作用于多张照片，**「完成」才写入磁盘、「取消」瞬间还原**，改错了也不心疼。
 
-**4. 🗑️ 一键清理，释放空间**
-每张照片往往同时存在 RAW 和 JPG 两个文件，手动删除容易遗漏。SwiftCull 自动识别配对文件，一键删除同时清理 RAW+JPG，连同 MOV 视频文件也一并管理，彻底释放存储空间。筛选结果可一键导出到指定目录。
+**4. 🗑️ 配对清理与导出**
+每张照片常同时存在 RAW / JPG / MOV 多个文件，SwiftCull 自动识别配对，删除时一并移入废纸篓（可恢复），彻底释放存储空间。筛选结果可一键导出到指定目录，**导出在后台执行并显示实时进度，全程不卡顿**。
 
 **5. 📷 EXIF 信息，一目了然**
 自动提取相机型号、镜头、焦距、光圈、快门速度、ISO、拍摄时间等 EXIF 数据，基于 ImageIO 框架纯原生实现。
@@ -42,12 +46,12 @@
 
 ## ⌨️ 快捷键
 
-| 导航 | 评分 | 视图 | 操作 |
-|:----:|:----:|:----:|:----:|
-| `←` `→` 前后切换 | `1`–`5` 设置评分 | `E` 网格/单张切换 | `⌘O` 打开文件夹 |
-| `↑` `↓` 按列跳转 | `0` 清除评分 | `Tab` 侧边栏开关 | `A` 全选 |
-| `Space` Quick Look 预览 | | `F` 切换全屏 | `⌫` 删除选中 |
-| | | | `⌘/` 快捷键指南 |
+| 导航 / 预览 | 评分 | 视图 | 操作 |
+|:----|:----|:----|:----|
+| `←` `→` 上一张 / 下一张 | `1`–`5` 设置评分（支持批量） | `E` 网格 / 大图切换 | `A` 全选当前筛选结果 |
+| `↑` `↓` 按列跨行跳转 | `0` 清除评分 | `Tab` 侧边栏开关 | `⌫` 删除选中（RAW+JPG+MOV） |
+| `Space` Quick Look 预览 | | 大图下捏合 / 双击 / `＋ －` 缩放 | `Esc` 退出多选 / 取消输入焦点 |
+| | | | `⌘O` 打开文件夹 · `⌘/` 快捷键手册 |
 
 ## 🛠 系统要求
 
@@ -89,57 +93,52 @@
    open SwiftCull.xcodeproj
    ```
 
+> 修改、增删源文件后，记得重新运行 `xcodegen generate`（或 `./run.sh gen`）同步工程。
+
 ## 📖 使用方法
 
-1. 启动 SwiftCull — 自动检测已连接的 SD 卡和常用目录
-2. 点击**打开文件夹**或按 `⌘O` 选择其他目录
-3. 单击照片选中，按**空格键**进行 Quick Look 大图预览
-4. 使用**方向键**在照片间导航
-5. 点击**选择**按钮进入批量选择模式
-6. 在选择模式中，使用工具栏批量设置评分、标签或删除
-7. 使用 **AI 筛选**面板进行智能照片分析与批量决策
+1. 启动 SwiftCull — 自动检测已连接的 SD 卡与常用目录
+2. 点击**打开文件夹**或按 `⌘O` 选择目录
+3. 方向键在照片间导航，`Space` 唤起 Quick Look 大图预览
+4. 按 `E` 进入大图模式审片，捏合 / 双击 / `＋ －` 缩放查看细节
+5. `1`–`5` 打分、`⌫` 删除；点**选择**进入批量模式，一键批量评分 / 打标签 / 删除
+6. 批量修改在点「完成」后写入，点「取消」则全部还原
+7. 在侧边栏配置筛选与排序，点**导出筛选结果**把留下的照片拷贝到新目录
 
 ## 🧩 项目架构
+
+纯 SwiftUI + MVVM，无第三方依赖。`PhotoStore` 作为唯一数据源统一管理状态与业务逻辑。
 
 ```
 SwiftCull/
 ├── App/
-│   ├── SwiftCullApp.swift            # 应用入口
-│   └── KeyboardShortcutHandler.swift  # 快捷键管理
+│   ├── SwiftCullApp.swift             # 应用入口与菜单命令
+│   └── KeyboardShortcutHandler.swift  # 全局键盘快捷键
 ├── Models/
-│   ├── PhotoEntry.swift              # 照片数据模型
-│   ├── FilterOptions.swift           # 筛选条件
-│   ├── FinderTag.swift               # Finder 标签
-│   ├── PhotoExifInfo.swift           # EXIF 信息
-│   └── AIAnalysisResult.swift        # AI 分析结果
-├── Services/
-│   ├── FileService.swift             # 文件操作
-│   ├── RatingService.swift           # 评分管理
-│   ├── TagService.swift              # 标签管理
-│   ├── FinderTagService.swift        # Finder 标签集成
-│   ├── ThumbnailService.swift        # 缩略图生成
-│   ├── AICullService.swift           # AI 筛选核心
-│   ├── LLMService.swift              # LLM 云端分析
-│   ├── LocalVisionService.swift      # 本地 Vision 分析
-│   ├── FastPreScreen.swift           # 快速预筛选
-│   └── ProjectMetadataService.swift  # 项目元数据
+│   ├── PhotoEntry.swift               # 照片数据模型（RAW/JPG/MOV 配对）
+│   ├── FilterOptions.swift            # 筛选与排序条件
+│   ├── FinderTag.swift                # Finder 标签模型
+│   └── PhotoExifInfo.swift            # EXIF 信息与缓存
 ├── ViewModels/
-│   ├── PhotoStore.swift              # 照片数据管理
-│   └── PhotoCellState.swift          # 单元格状态
+│   └── PhotoStore.swift               # 应用状态与业务逻辑核心
+├── Services/
+│   ├── FileService.swift              # 目录扫描 / 文件配对 / 移入废纸篓
+│   ├── RatingService.swift            # 评分持久化
+│   ├── TagService.swift               # Finder 标签读写（扩展属性）
+│   ├── FinderTagService.swift         # Finder 标签发现与配色
+│   ├── ThumbnailService.swift         # 缩略图生成与内存 / 磁盘缓存
+│   └── ProjectMetadataService.swift   # 项目 sidecar 元数据（.swiftcull）
 └── Views/
-    ├── ContentView.swift             # 主视图
-    ├── FilterSidebar.swift           # 筛选侧边栏
-    ├── PhotoGridView.swift           # 照片网格
-    ├── PhotoDetailView.swift         # 照片详情
-    ├── PhotoCardView.swift           # 照片卡片
-    ├── AsyncThumbnailView.swift      # 异步缩略图
-    ├── RatingView.swift              # 评分视图
-    ├── SelectionCommandBar.swift     # 批量操作栏
-    ├── WelcomeView.swift             # 欢迎页面
-    ├── AICullPanelView.swift         # AI 筛选面板
-    ├── AICullReviewView.swift        # AI 结果确认
-    ├── AICullSettingsView.swift      # AI 设置
-    └── Components/                   # 可复用组件
+    ├── ContentView.swift              # 三栏主界面
+    ├── FilterSidebar.swift            # 筛选侧边栏 + 导出
+    ├── PhotoGridView.swift            # 照片网格 / 分组 / 框选 / 批量栏
+    ├── PhotoDetailView.swift          # 右侧详情（信息 / EXIF / 评分 / 标签）
+    ├── PhotoCardView.swift            # 网格照片卡片
+    ├── AsyncThumbnailView.swift       # 异步缩略图与大图加载
+    ├── RatingView.swift               # 星级评分控件
+    ├── WelcomeView.swift              # 欢迎页 / 大图审片 / 快捷键手册
+    ├── SelectionCommandBar.swift      # 批量栏小组件
+    └── Components/                    # GlassCard / FlowLayout / 按钮样式等
 ```
 
 ## 📄 许可证

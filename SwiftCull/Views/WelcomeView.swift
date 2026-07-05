@@ -94,12 +94,14 @@ struct ShortcutGuideView: View {
         ("↑ ↓ ← →", "按网格位置选择照片"),
         ("拖拽框选", "鼠标框选多张照片"),
         ("Space", "Quick Look 预览"),
-        ("E", "网格视图 / 详情视图切换"),
+        ("E", "网格 / 大图切换"),
+        ("大图缩放", "捏合 / 双击 / ＋ － 缩放，拖拽平移"),
         ("Tab", "切换侧边栏"),
         ("1-5", "设置评分"),
         ("0", "清除评分"),
         ("Delete", "删除所选照片"),
         ("A", "全选当前筛选结果"),
+        ("Esc", "退出多选 / 取消输入焦点"),
         ("⌘O", "打开文件夹")
     ]
 
@@ -161,46 +163,189 @@ struct ToolbarInfoView: View {
 struct PhotoSinglePreviewView: View {
     let photo: PhotoEntry
 
+    @State private var scale: CGFloat = 1
+    @State private var steadyScale: CGFloat = 1
+    @State private var offset: CGSize = .zero
+    @State private var steadyOffset: CGSize = .zero
+    @State private var containerSize: CGSize = .zero
+
+    private let minScale: CGFloat = 1
+    private let maxScale: CGFloat = 6
+
     var body: some View {
         ZStack {
-            LinearGradient(
-                colors: [
-                    Color(nsColor: .windowBackgroundColor),
-                    Color(nsColor: .controlBackgroundColor).opacity(0.74)
-                ],
-                startPoint: .top,
-                endPoint: .bottom
-            )
+            background
 
-            DetailThumbnailView(photo: photo, targetSize: 1800)
-                .padding(.horizontal, 34)
-                .padding(.vertical, 28)
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
-        }
-        .overlay(alignment: .bottom) {
-            HStack(spacing: 8) {
-                Text(photo.displayName)
-                    .font(.caption.weight(.semibold))
-                    .lineLimit(1)
-                    .truncationMode(.middle)
-
-                Text(photo.fileTypeBadge)
-                    .font(.caption2.weight(.bold))
-                    .foregroundStyle(photo.fileTypeBadgeColor)
-                    .padding(.horizontal, 7)
-                    .padding(.vertical, 3)
-                    .background(photo.fileTypeBadgeColor.opacity(0.14), in: Capsule())
-
-                Spacer()
-
-                Text(photo.formattedDate)
-                    .font(.caption2)
-                    .foregroundStyle(.secondary)
+            GeometryReader { geo in
+                DetailThumbnailView(photo: photo, targetSize: 1800)
+                    .scaleEffect(scale)
+                    .offset(offset)
+                    .frame(width: geo.size.width, height: geo.size.height)
+                    .contentShape(Rectangle())
+                    .gesture(magnifyGesture(in: geo.size))
+                    .simultaneousGesture(panGesture(in: geo.size))
+                    .onTapGesture(count: 2) { toggleZoom() }
+                    .onTapGesture(count: 1) { resignFocus() }
+                    .onAppear { containerSize = geo.size }
+                    .onChange(of: geo.size) { _, newValue in containerSize = newValue }
             }
-            .padding(.horizontal, 12)
-            .padding(.vertical, 8)
-            .background(.bar, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
-            .padding(14)
+            .padding(.horizontal, 24)
+            .padding(.vertical, 20)
+            .clipped()
         }
+        .overlay(alignment: .bottom) { infoBar }
+        .overlay(alignment: .topTrailing) { zoomControls }
+        .onChange(of: photo.id) { _, _ in resetZoom() }
+    }
+
+    private var background: some View {
+        LinearGradient(
+            colors: [
+                Color(nsColor: .windowBackgroundColor),
+                Color(nsColor: .controlBackgroundColor).opacity(0.74)
+            ],
+            startPoint: .top,
+            endPoint: .bottom
+        )
+    }
+
+    private var infoBar: some View {
+        HStack(spacing: 8) {
+            Text(photo.displayName)
+                .font(.caption.weight(.semibold))
+                .lineLimit(1)
+                .truncationMode(.middle)
+
+            Text(photo.fileTypeBadge)
+                .font(.caption2.weight(.bold))
+                .foregroundStyle(photo.fileTypeBadgeColor)
+                .padding(.horizontal, 7)
+                .padding(.vertical, 3)
+                .background(photo.fileTypeBadgeColor.opacity(0.14), in: Capsule())
+
+            Spacer()
+
+            Text(photo.formattedDate)
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 8)
+        .background(.bar, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+        .padding(14)
+    }
+
+    private var zoomControls: some View {
+        HStack(spacing: 4) {
+            Button {
+                zoomBy(1 / 1.5)
+            } label: {
+                Image(systemName: "minus.magnifyingglass")
+            }
+            .disabled(scale <= minScale)
+
+            Button {
+                withAnimation(.spring(response: 0.3, dampingFraction: 0.85)) { resetZoom() }
+            } label: {
+                Text("\(Int((scale * 100).rounded()))%")
+                    .font(.caption.monospacedDigit().weight(.medium))
+                    .frame(minWidth: 44)
+            }
+            .help("重置缩放")
+
+            Button {
+                zoomBy(1.5)
+            } label: {
+                Image(systemName: "plus.magnifyingglass")
+            }
+            .disabled(scale >= maxScale)
+        }
+        .font(.system(size: 13, weight: .medium))
+        .buttonStyle(.plain)
+        .padding(.horizontal, 8)
+        .padding(.vertical, 6)
+        .background(.bar, in: Capsule())
+        .overlay(Capsule().stroke(.white.opacity(0.12), lineWidth: 0.5))
+        .padding(14)
+    }
+
+    // MARK: - Zoom & Pan
+
+    private func magnifyGesture(in size: CGSize) -> some Gesture {
+        MagnifyGesture()
+            .onChanged { value in
+                scale = min(max(steadyScale * value.magnification, minScale), maxScale)
+                offset = clampedOffset(offset, in: size)
+            }
+            .onEnded { _ in
+                steadyScale = scale
+                if scale <= minScale {
+                    withAnimation(.spring(response: 0.3, dampingFraction: 0.85)) { resetZoom() }
+                } else {
+                    steadyOffset = offset
+                }
+            }
+    }
+
+    private func panGesture(in size: CGSize) -> some Gesture {
+        DragGesture()
+            .onChanged { value in
+                guard scale > minScale else { return }
+                let proposed = CGSize(
+                    width: steadyOffset.width + value.translation.width,
+                    height: steadyOffset.height + value.translation.height
+                )
+                offset = clampedOffset(proposed, in: size)
+            }
+            .onEnded { _ in
+                guard scale > minScale else { return }
+                steadyOffset = offset
+            }
+    }
+
+    private func toggleZoom() {
+        withAnimation(.spring(response: 0.32, dampingFraction: 0.82)) {
+            if scale > minScale {
+                resetZoom()
+            } else {
+                scale = 2.5
+                steadyScale = 2.5
+            }
+        }
+    }
+
+    private func zoomBy(_ factor: CGFloat) {
+        withAnimation(.spring(response: 0.3, dampingFraction: 0.85)) {
+            scale = min(max(scale * factor, minScale), maxScale)
+            steadyScale = scale
+            if scale <= minScale {
+                offset = .zero
+                steadyOffset = .zero
+            } else {
+                offset = clampedOffset(offset, in: containerSize)
+                steadyOffset = offset
+            }
+        }
+    }
+
+    private func resetZoom() {
+        scale = minScale
+        steadyScale = minScale
+        offset = .zero
+        steadyOffset = .zero
+    }
+
+    /// 将平移量限制在缩放后图片的可视范围内
+    private func clampedOffset(_ proposed: CGSize, in size: CGSize) -> CGSize {
+        let maxX = max(0, (size.width * scale - size.width) / 2)
+        let maxY = max(0, (size.height * scale - size.height) / 2)
+        return CGSize(
+            width: min(max(proposed.width, -maxX), maxX),
+            height: min(max(proposed.height, -maxY), maxY)
+        )
+    }
+
+    private func resignFocus() {
+        NSApp.keyWindow?.makeFirstResponder(nil)
     }
 }

@@ -4,16 +4,6 @@ import Foundation
 
 struct PhotoMetadata: Codable, Sendable {
     var rating: Int?
-    var workflowMark: String?
-    var aiResult: AIMetadata?
-
-    struct AIMetadata: Codable, Sendable {
-        let verdict: String
-        let reason: String
-        let provider: String?
-        let model: String?
-        let analyzedAt: Date?
-    }
 }
 
 struct ProjectMetadataFile: Codable {
@@ -81,12 +71,6 @@ final class ProjectMetadataService: @unchecked Sendable {
         queue.asyncAfter(deadline: .now() + saveDelay, execute: work)
     }
 
-    func saveImmediately(entries: [String: PhotoMetadata], folderPath: String) {
-        pendingWork?.cancel()
-        pendingWork = nil
-        saveNow(entries: entries, folderPath: folderPath)
-    }
-
     private func saveNow(entries: [String: PhotoMetadata], folderPath: String) {
         let dirURL = sidecarDirectoryURL(for: folderPath)
         let fileURL = sidecarFileURL(for: folderPath)
@@ -106,13 +90,6 @@ final class ProjectMetadataService: @unchecked Sendable {
         } catch {
             print("[ProjectMetadata] 写入失败: \(error.localizedDescription)")
         }
-    }
-
-    // MARK: - Helpers
-
-    func removeSidecar(folderPath: String) {
-        let dirURL = sidecarDirectoryURL(for: folderPath)
-        try? FileManager.default.removeItem(at: dirURL)
     }
 }
 

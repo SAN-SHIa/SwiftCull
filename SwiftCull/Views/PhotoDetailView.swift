@@ -70,7 +70,6 @@ struct PhotoDetailView: View {
                     VStack(spacing: 8) {
                         infoSection(photo)
                         exifSection(photo)
-                        aiAnalysisSection(photo)
                         ratingSection(photo)
                         tagSection(photo)
                         actionSection(photo)
@@ -216,47 +215,6 @@ struct PhotoDetailView: View {
         }
     }
 
-    // MARK: - AI 分析详情
-
-    @ViewBuilder
-    private func aiAnalysisSection(_ photo: PhotoEntry) -> some View {
-        if let ai = photo.aiResult {
-            DetailCard(title: "AI 分析", systemImage: "wand.and.stars") {
-                VStack(alignment: .leading, spacing: 8) {
-                    // 判定结果
-                    HStack(spacing: 6) {
-                        Image(systemName: ai.verdict == .reject ? "xmark.circle.fill" : "checkmark.circle.fill")
-                            .font(.system(size: 14))
-                            .foregroundStyle(ai.verdict == .reject ? .red : .green)
-
-                        Text(ai.verdict == .reject ? "废片" : "通过")
-                            .font(.system(size: 13, weight: .semibold))
-                            .foregroundStyle(ai.verdict == .reject ? .red : .green)
-
-                        Spacer()
-
-                        Text(ai.reason)
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                            .lineLimit(2)
-                            .multilineTextAlignment(.trailing)
-                    }
-
-                    Divider()
-
-                    // 元信息
-                    HStack(spacing: 12) {
-                        Label(ai.provider, systemImage: "server.rack")
-                        Label(ai.model, systemImage: "cpu")
-                        Text(ai.analyzedAt, style: .relative)
-                    }
-                    .font(.caption2)
-                    .foregroundStyle(.tertiary)
-                }
-            }
-        }
-    }
-
     private func ratingSection(_ photo: PhotoEntry) -> some View {
         DetailCard(title: "评分", systemImage: "star") {
             RatingView(rating: photo.rating) { newRating in
@@ -337,30 +295,13 @@ struct PhotoDetailView: View {
                 let jpgFiles = activePhotos.compactMap(\.jpgPath).map { URL(fileURLWithPath: $0) }
                 let rawFiles = activePhotos.compactMap(\.nefPath).map { URL(fileURLWithPath: $0) }
                 let movFiles = activePhotos.compactMap(\.movPath).map { URL(fileURLWithPath: $0) }
+                let allFiles = jpgFiles + rawFiles + movFiles
 
-                if !jpgFiles.isEmpty {
+                if !allFiles.isEmpty {
                     Button {
-                        NSWorkspace.shared.activateFileViewerSelecting(jpgFiles)
+                        NSWorkspace.shared.activateFileViewerSelecting(allFiles)
                     } label: {
-                        actionLabel("在 Finder 中显示 JPG", systemImage: "folder")
-                    }
-                    .buttonStyle(InspectorActionButtonStyle())
-                }
-
-                if !rawFiles.isEmpty {
-                    Button {
-                        NSWorkspace.shared.activateFileViewerSelecting(rawFiles)
-                    } label: {
-                        actionLabel("在 Finder 中显示 RAW", systemImage: "folder")
-                    }
-                    .buttonStyle(InspectorActionButtonStyle())
-                }
-
-                if !movFiles.isEmpty {
-                    Button {
-                        NSWorkspace.shared.activateFileViewerSelecting(movFiles)
-                    } label: {
-                        actionLabel("在 Finder 中显示 MOV", systemImage: "folder")
+                        actionLabel("在 Finder 中显示", systemImage: "folder")
                     }
                     .buttonStyle(InspectorActionButtonStyle())
                 }

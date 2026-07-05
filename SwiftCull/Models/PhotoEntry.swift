@@ -1,11 +1,5 @@
 import SwiftUI
 
-enum PhotoWorkflowMark: String, Hashable, Sendable {
-    case none
-    case pick
-    case reject
-}
-
 struct PhotoEntry: Identifiable, Hashable, Sendable {
     let id: String
     let baseName: String
@@ -20,8 +14,6 @@ struct PhotoEntry: Identifiable, Hashable, Sendable {
     var rating: Int
     var tags: [String]
     var isDeleted: Bool
-    var workflowMark: PhotoWorkflowMark
-    var aiResult: AIAnalysisResult?
 
     init(baseName: String, jpgPath: String?, nefPath: String?, movPath: String?,
          jpgFileSize: Int64?, nefFileSize: Int64?, movFileSize: Int64?, fileDate: Date, modificationDate: Date) {
@@ -38,8 +30,6 @@ struct PhotoEntry: Identifiable, Hashable, Sendable {
         self.rating = 0
         self.tags = []
         self.isDeleted = false
-        self.workflowMark = .none
-        self.aiResult = nil
     }
 
     var hasJpg: Bool { jpgPath != nil }
@@ -76,26 +66,12 @@ struct PhotoEntry: Identifiable, Hashable, Sendable {
         Self.displayDateFormatter.string(from: modificationDate)
     }
 
-    var exifInfo: PhotoExifInfo {
-        PhotoExifInfo.load(from: primaryImagePath, fallbackDate: fileDate)
-    }
-
     var primaryImagePath: String {
         jpgPath ?? nefPath ?? ""
     }
 
     var primaryFilePath: String {
         jpgPath ?? nefPath ?? movPath ?? ""
-    }
-
-    var fileTypeDescription: String {
-        var types: [String] = []
-        if hasJpg { types.append("JPG") }
-        if let nefPath = nefPath {
-            types.append((nefPath as NSString).pathExtension.uppercased())
-        }
-        if hasMov { types.append("MOV") }
-        return types.joined(separator: " + ")
     }
 
     var fileTypeBadge: String {
@@ -117,6 +93,6 @@ struct PhotoEntry: Identifiable, Hashable, Sendable {
     }
 
     var hasAnyMark: Bool {
-        rating > 0 || !tags.isEmpty || workflowMark != .none
+        rating > 0 || !tags.isEmpty
     }
 }

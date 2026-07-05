@@ -95,14 +95,6 @@ struct ContentView: View {
         .sheet(isPresented: $store.showingShortcutGuide) {
             ShortcutGuideView()
         }
-        .sheet(isPresented: $store.showingAICullReview) {
-            AICullReviewView(
-                cullService: store.aiCullService,
-                photos: store.filteredPhotos.isEmpty ? store.photos : store.filteredPhotos,
-                onApply: { marked in store.applyAICullResults(markedPhotos: marked) },
-                onCancel: { store.cancelAICull() }
-            )
-        }
         .task {
             store.detectVolumes()
             await store.loadPhotos()
@@ -135,13 +127,7 @@ struct ContentView: View {
         } else if store.viewMode == .single, let photo = store.selectedPhoto {
             PhotoSinglePreviewView(photo: photo)
         } else {
-            VStack(spacing: 0) {
-                // AI 筛选内嵌面板
-                AICullPanelView(cullService: store.aiCullService)
-                    .environmentObject(store)
-
-                PhotoGridView()
-            }
+            PhotoGridView()
         }
     }
 }

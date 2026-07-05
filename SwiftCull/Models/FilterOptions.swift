@@ -42,24 +42,6 @@ enum FileTypeFilter: String, CaseIterable, Identifiable, Sendable {
     }
 }
 
-enum AIFilter: String, CaseIterable, Identifiable, Sendable {
-    case all = "all"
-    case aiReject = "reject"
-    case aiPass = "pass"
-    case aiNotAnalyzed = "unanalyzed"
-
-    var id: String { rawValue }
-
-    var displayName: String {
-        switch self {
-        case .all: return "全部"
-        case .aiReject: return "AI 废片"
-        case .aiPass: return "AI 通过"
-        case .aiNotAnalyzed: return "未分析"
-        }
-    }
-}
-
 enum SortOption: String, CaseIterable, Identifiable, Sendable {
     case date = "date"
     case name = "name"
@@ -83,8 +65,6 @@ enum DatePreset: String, CaseIterable, Identifiable, Sendable {
     case yesterday
     case last7Days
     case last30Days
-    case thisMonth
-    case lastMonth
     case custom
 
     var id: String { rawValue }
@@ -95,8 +75,6 @@ enum DatePreset: String, CaseIterable, Identifiable, Sendable {
         case .yesterday: return "昨天"
         case .last7Days: return "近 7 天"
         case .last30Days: return "近 30 天"
-        case .thisMonth: return "本月"
-        case .lastMonth: return "上月"
         case .custom: return "自定义"
         }
     }
@@ -116,15 +94,6 @@ enum DatePreset: String, CaseIterable, Identifiable, Sendable {
         case .last30Days:
             let start = cal.date(byAdding: .day, value: -29, to: cal.startOfDay(for: now))!
             return (start, now)
-        case .thisMonth:
-            let comps = cal.dateComponents([.year, .month], from: now)
-            let start = cal.date(from: comps)!
-            return (start, now)
-        case .lastMonth:
-            let thisMonthStart = cal.date(from: cal.dateComponents([.year, .month], from: now))!
-            let lastMonthEnd = cal.date(byAdding: .day, value: -1, to: thisMonthStart)!
-            let lastMonthStart = cal.date(from: cal.dateComponents([.year, .month], from: lastMonthEnd))!
-            return (lastMonthStart, cal.date(bySettingHour: 23, minute: 59, second: 59, of: lastMonthEnd)!)
         case .custom:
             return nil
         }
@@ -136,7 +105,6 @@ struct FilterOptions: Sendable {
     var ratingFilter: RatingFilter = .all
     var fileTypeFilter: FileTypeFilter = .all
     var tagFilter: String? = nil
-    var aiFilter: AIFilter = .all
     var sortOption: SortOption = .date
     var sortAscending: Bool = false
     var startDate: Date? = nil

@@ -2,13 +2,6 @@ import Foundation
 import SwiftUI
 import Combine
 
-struct PhotoSnapshot: Sendable {
-    let photoId: String
-    let rating: Int
-    let tags: [String]
-    let workflowMark: PhotoWorkflowMark
-}
-
 struct DetectedVolume: Identifiable, Sendable {
     let id = UUID()
     let name: String
@@ -25,6 +18,8 @@ enum PhotoViewMode: Sendable {
 class PhotoStore: ObservableObject {
     @Published var photos: [PhotoEntry] = []
     @Published var filteredPhotos: [PhotoEntry] = []
+    /// 每当 filteredPhotos 的成员或顺序变化时自增，供视图做轻量 onChange 触发（避免全量 map(\.id)）
+    @Published private(set) var filteredPhotosVersion = 0
     @Published var selectedPhoto: PhotoEntry?
     @Published var selectedPhotos: Set<String> = []
     @Published var filterOptions = FilterOptions()
@@ -36,19 +31,13 @@ class PhotoStore: ObservableObject {
     @Published var showingDeleteConfirmation = false
     @Published var photosToDelete: [PhotoEntry] = []
     @Published var isExporting = false
+    @Published var exportProgress: Double = 0
     @Published var exportMessage: String?
     @Published var viewMode: PhotoViewMode = .grid
     @Published var isSidebarVisible = true
     @Published var showingShortcutGuide = false
     @Published var isSelectMode = false
     @Published var detectedVolumes: [DetectedVolume] = []
-    @Published var showingAICullReview = false
-    @Published var aiCullService = AICullService()
-    let cellState = PhotoCellState()
-    private let batchThrottler = BatchThrottler()
-    private var cancellables = Set<AnyCancellable>()
-    /// 批量同步中，抑制 objectWillChange
-    private var suppressPublish = false
 
     private let fileService = FileService.shared
     private let tagService = TagService.shared
@@ -58,7 +47,13 @@ class PhotoStore: ObservableObject {
     private let projectMetadata = ProjectMetadataService.shared
     private var sidecarEntries: [String: PhotoMetadata] = [:]
 
-    private var selectModeSnapshot: [PhotoSnapshot] = []
+    /// 选择模式下被编辑过的照片在编辑前的原始状态（用于「取消」纯内存回滚，零磁盘 IO）
+    private struct OriginalPhotoState {
+        let rating: Int
+        let tags: [String]
+    }
+    private var editedOriginals: [String: OriginalPhotoState] = [:]
+
     private var gridColumnCount = 1
     private var currentLoadID = UUID()
     private var lastPreheatKey: String?
@@ -67,11 +62,6 @@ class PhotoStore: ObservableObject {
     }
 
     init() {}
-
-    /// 同步选中状态到 cellState（必须在每次 selectedPhotos 变更后调用）
-    private func syncSelectionToCellState() {
-        cellState.setSelection(selectedPhotos)
-    }
 
     private func buildPhotoIndexMap() -> [String: Int] {
         var map: [String: Int] = [:]
@@ -125,11 +115,14 @@ class PhotoStore: ObservableObject {
         selectedPhotos = []
         photosToDelete = []
         showingDeleteConfirmation = false
+        isSelectMode = false
+        editedOriginals = [:]
         viewMode = .grid
 
         if sourcePath.isEmpty {
             photos = []
             filteredPhotos = []
+            filteredPhotosVersion &+= 1
             isLoading = false
             loadingProgress = 0
             loadingStatus = ""
@@ -211,7 +204,7 @@ class PhotoStore: ObservableObject {
         loadingStatus = "正在加载项目标注..."
         loadingProgress = 0.88
 
-        // 加载 sidecar 标注（星级、workflowMark、AI 结果）
+        // 加载 sidecar 标注（星级）
         sidecarEntries = projectMetadata.load(from: sourcePath)
         if !sidecarEntries.isEmpty {
             for i in enriched.indices {
@@ -219,18 +212,6 @@ class PhotoStore: ObservableObject {
                 if let meta = sidecarEntries[id] {
                     if let r = meta.rating, r > 0 {
                         enriched[i].rating = r
-                    }
-                    if let mark = meta.workflowMark, let wm = PhotoWorkflowMark(rawValue: mark) {
-                        enriched[i].workflowMark = wm
-                    }
-                    if let ai = meta.aiResult {
-                        enriched[i].aiResult = AIAnalysisResult(
-                            verdict: AIAnalysisResult.Verdict(rawValue: ai.verdict) ?? .pass,
-                            reason: ai.reason,
-                            provider: ai.provider ?? "unknown",
-                            model: ai.model ?? "unknown",
-                            analyzedAt: ai.analyzedAt ?? Date()
-                        )
                     }
                 }
             }
@@ -252,38 +233,15 @@ class PhotoStore: ObservableObject {
         guard !sourcePath.isEmpty else { return }
         var entries: [String: PhotoMetadata] = [:]
         for photo in photos {
-            var meta = PhotoMetadata()
-            var hasData = false
-
             if photo.rating > 0 {
-                meta.rating = photo.rating
-                hasData = true
-            }
-            if photo.workflowMark != .none {
-                meta.workflowMark = photo.workflowMark.rawValue
-                hasData = true
-            }
-            if let ai = photo.aiResult {
-                meta.aiResult = PhotoMetadata.AIMetadata(
-                    verdict: ai.verdict.rawValue,
-                    reason: ai.reason,
-                    provider: ai.provider,
-                    model: ai.model,
-                    analyzedAt: ai.analyzedAt
-                )
-                hasData = true
-            }
-
-            if hasData {
-                entries[photo.id] = meta
+                entries[photo.id] = PhotoMetadata(rating: photo.rating)
             }
         }
         sidecarEntries = entries
         projectMetadata.scheduleSave(entries: entries, folderPath: sourcePath)
     }
 
-        func preloadThumbnails(around photo: PhotoEntry, size: CGFloat) {
-        guard !aiCullService.isAnalyzing else { return }
+    func preloadThumbnails(around photo: PhotoEntry, size: CGFloat) {
         guard let centerIndex = filteredPhotos.firstIndex(where: { $0.id == photo.id }) else { return }
         let quantizedSize = Int(size.rounded())
         let key = "\(photo.id)|\(quantizedSize)|\(gridColumnCount)"
@@ -333,19 +291,6 @@ class PhotoStore: ObservableObject {
 
             if let tagFilter, !photo.tags.contains(tagFilter) { continue }
 
-            // AI 筛选过滤
-            switch filterOptions.aiFilter {
-            case .all: break
-            case .aiReject:
-                if let r = photo.aiResult { if r.verdict != .reject { continue } }
-                else { continue }
-            case .aiPass:
-                if let r = photo.aiResult { if r.verdict != .pass { continue } }
-                else { continue }
-            case .aiNotAnalyzed:
-                if photo.aiResult != nil { continue }
-            }
-
             // 日期范围过滤（仅开启时生效）
             if filterOptions.dateFilterEnabled {
                 if let start = filterOptions.startDate, photo.fileDate < start { continue }
@@ -356,7 +301,7 @@ class PhotoStore: ObservableObject {
         }
 
         filteredPhotos = sortPhotos(result)
-        cellState.sync(from: photos)
+        filteredPhotosVersion &+= 1
     }
 
     private func sortPhotos(_ photos: [PhotoEntry]) -> [PhotoEntry] {
@@ -387,10 +332,6 @@ class PhotoStore: ObservableObject {
         syncSidecar()
     }
 
-    func clearRating(for photo: PhotoEntry) {
-        setRating(0, for: photo)
-    }
-
     func clearTags(for photo: PhotoEntry) {
         guard let index = photos.firstIndex(where: { $0.id == photo.id }) else { return }
         _ = tagService.setTagsForPhotoPair([], photo: photos[index])
@@ -401,14 +342,6 @@ class PhotoStore: ObservableObject {
         if selectedPhoto?.id == photo.id {
             selectedPhoto?.tags = []
         }
-    }
-
-    func toggleSelectedPickMark() {
-        toggleActiveMark(.pick)
-    }
-
-    func toggleSelectedRejectMark() {
-        toggleActiveMark(.reject)
     }
 
     func toggleSinglePreview() {
@@ -428,138 +361,78 @@ class PhotoStore: ObservableObject {
         isSidebarVisible.toggle()
     }
 
-    private func markActivePhotos(_ mark: PhotoWorkflowMark) {
-        defer { syncSidecar() }
-        let ids = activePhotoIds
-        guard !ids.isEmpty else { return }
+    // MARK: - 批量操作（选择模式下仅改内存，落盘延迟到「完成」）
 
-        // 1️⃣ cellState 写入 → Cell 即时刷新（无数组拷贝）
-        cellState.batchSetMarks(ids, mark: mark)
-
-        // 2️⃣ 延迟单次同步数组（合并多次操作为一次写入）
-        batchThrottler.throttle { [weak self] in
-            self?.flushCellStateToArrays()
-        }
-    }
-
-    private func toggleActiveMark(_ mark: PhotoWorkflowMark) {
-        defer { syncSidecar() }
-        let ids = activePhotoIds
-        guard !ids.isEmpty else { return }
-        // 读 cellState 判断是否需要清除
-        let allAlreadyMarked = ids.allSatisfy { cellState.getMark($0) == mark }
-        markActivePhotos(allAlreadyMarked ? .none : mark)
+    /// 记录一张照片在本次选择会话中首次被编辑前的原始状态
+    private func captureOriginalIfNeeded(_ id: String, index: Int) {
+        guard editedOriginals[id] == nil else { return }
+        editedOriginals[id] = OriginalPhotoState(rating: photos[index].rating, tags: photos[index].tags)
     }
 
     func batchSetRating(_ rating: Int) {
-        defer { syncSidecar() }
         let ids = selectedPhotos
         guard !ids.isEmpty else { return }
+        let photoMap = buildPhotoIndexMap()
+        let filteredMap = buildFilteredIndexMap()
 
-        cellState.batchSetRatings(ids, rating: rating)
-
-        batchThrottler.throttle { [weak self] in
-            self?.flushCellStateToArrays()
-        }
-    }
-
-    /// 将 cellState 中的 mark/rating 一次性写回 photos/filteredPhotos 数组
-    private func flushCellStateToArrays() {
-        var changed = false
-        for i in photos.indices {
-            let id = photos[i].id
-            let csMark = cellState.getMark(id)
-            if photos[i].workflowMark != csMark {
-                photos[i].workflowMark = csMark
-                changed = true
+        for id in ids {
+            if let index = photoMap[id] {
+                captureOriginalIfNeeded(id, index: index)
+                photos[index].rating = rating
             }
-            let csRating = cellState.getRating(id)
-            if photos[i].rating != csRating {
-                ratingService.setRating(csRating, for: id)
-                photos[i].rating = csRating
-                changed = true
+            if let filteredIndex = filteredMap[id] {
+                filteredPhotos[filteredIndex].rating = rating
             }
         }
-        for i in filteredPhotos.indices {
-            let id = filteredPhotos[i].id
-            let csMark = cellState.getMark(id)
-            if filteredPhotos[i].workflowMark != csMark {
-                filteredPhotos[i].workflowMark = csMark
-                changed = true
-            }
-            let csRating = cellState.getRating(id)
-            if filteredPhotos[i].rating != csRating {
-                filteredPhotos[i].rating = csRating
-                changed = true
-            }
-        }
-        if changed, let selected = selectedPhoto {
-            selectedPhoto?.workflowMark = cellState.getMark(selected.id)
-            selectedPhoto?.rating = cellState.getRating(selected.id)
+        if let selected = selectedPhoto, ids.contains(selected.id) {
+            selectedPhoto?.rating = rating
         }
     }
 
     func batchClearRating() {
-        defer { syncSidecar() }
         batchSetRating(0)
     }
 
     func batchAddTag(_ tag: String) {
         let ids = selectedPhotos
         guard !ids.isEmpty else { return }
-        batchThrottler.throttle { [weak self] in
-            guard let self else { return }
-            let photoMap = self.buildPhotoIndexMap()
-            let filteredMap = self.buildFilteredIndexMap()
-            self.suppressPublish = true
-            for photoId in ids {
-                if let index = photoMap[photoId] {
-                    var tags = self.photos[index].tags
-                    if !tags.contains(tag) {
-                        tags.append(tag)
-                        _ = self.tagService.setTagsForPhotoPair(tags, photo: self.photos[index], colorLookup: self.tagColorLookup)
-                        self.photos[index].tags = tags
-                    }
-                }
-                if let filteredIndex = filteredMap[photoId] {
-                    var tags = self.filteredPhotos[filteredIndex].tags
-                    if !tags.contains(tag) {
-                        tags.append(tag)
-                        self.filteredPhotos[filteredIndex].tags = tags
-                    }
+        let photoMap = buildPhotoIndexMap()
+        let filteredMap = buildFilteredIndexMap()
+
+        for id in ids {
+            if let index = photoMap[id] {
+                captureOriginalIfNeeded(id, index: index)
+                if !photos[index].tags.contains(tag) {
+                    photos[index].tags.append(tag)
                 }
             }
-            if let selected = self.selectedPhoto, ids.contains(selected.id),
-               !selected.tags.contains(tag) {
-                self.selectedPhoto?.tags.append(tag)
+            if let filteredIndex = filteredMap[id], !filteredPhotos[filteredIndex].tags.contains(tag) {
+                filteredPhotos[filteredIndex].tags.append(tag)
             }
-            self.suppressPublish = false
-            self.objectWillChange.send()
+        }
+        if let selected = selectedPhoto, ids.contains(selected.id),
+           !(selectedPhoto?.tags.contains(tag) ?? true) {
+            selectedPhoto?.tags.append(tag)
         }
     }
 
     func batchClearTags() {
         let ids = selectedPhotos
         guard !ids.isEmpty else { return }
-        batchThrottler.throttle { [weak self] in
-            guard let self else { return }
-            let photoMap = self.buildPhotoIndexMap()
-            let filteredMap = self.buildFilteredIndexMap()
-            self.suppressPublish = true
-            for photoId in ids {
-                if let index = photoMap[photoId] {
-                    _ = self.tagService.setTagsForPhotoPair([], photo: self.photos[index])
-                    self.photos[index].tags = []
-                }
-                if let filteredIndex = filteredMap[photoId] {
-                    self.filteredPhotos[filteredIndex].tags = []
-                }
+        let photoMap = buildPhotoIndexMap()
+        let filteredMap = buildFilteredIndexMap()
+
+        for id in ids {
+            if let index = photoMap[id] {
+                captureOriginalIfNeeded(id, index: index)
+                photos[index].tags = []
             }
-            if let selected = self.selectedPhoto, ids.contains(selected.id) {
-                self.selectedPhoto?.tags = []
+            if let filteredIndex = filteredMap[id] {
+                filteredPhotos[filteredIndex].tags = []
             }
-            self.suppressPublish = false
-            self.objectWillChange.send()
+        }
+        if let selected = selectedPhoto, ids.contains(selected.id) {
+            selectedPhoto?.tags = []
         }
     }
 
@@ -593,48 +466,86 @@ class PhotoStore: ObservableObject {
         }
     }
 
+    // MARK: - 选择模式
+
     func enterSelectMode() {
-        selectModeSnapshot = photos.map {
-            PhotoSnapshot(photoId: $0.id, rating: $0.rating, tags: $0.tags, workflowMark: $0.workflowMark)
-        }
+        editedOriginals = [:]
         isSelectMode = true
     }
 
-    func exitSelectMode() {
-        if isSelectMode {
-            confirmSelectMode()
-        }
-    }
-
+    /// 取消：纯内存回滚被编辑过的照片，零磁盘 IO
     func cancelSelectMode() {
-        let photoMap = buildPhotoIndexMap()
-        let filteredMap = buildFilteredIndexMap()
-
-        for snapshot in selectModeSnapshot {
-            if let index = photoMap[snapshot.photoId] {
-                ratingService.setRating(snapshot.rating, for: snapshot.photoId)
-                photos[index].rating = snapshot.rating
-                _ = tagService.setTagsForPhotoPair(snapshot.tags, photo: photos[index], colorLookup: tagColorLookup)
-                photos[index].tags = snapshot.tags
-                photos[index].workflowMark = snapshot.workflowMark
-            }
-            if let filteredIndex = filteredMap[snapshot.photoId] {
-                filteredPhotos[filteredIndex].rating = snapshot.rating
-                filteredPhotos[filteredIndex].tags = snapshot.tags
-                filteredPhotos[filteredIndex].workflowMark = snapshot.workflowMark
+        if !editedOriginals.isEmpty {
+            let photoMap = buildPhotoIndexMap()
+            let filteredMap = buildFilteredIndexMap()
+            for (id, original) in editedOriginals {
+                if let index = photoMap[id] {
+                    photos[index].rating = original.rating
+                    photos[index].tags = original.tags
+                }
+                if let filteredIndex = filteredMap[id] {
+                    filteredPhotos[filteredIndex].rating = original.rating
+                    filteredPhotos[filteredIndex].tags = original.tags
+                }
             }
         }
-        selectModeSnapshot = []
+        editedOriginals = [:]
         selectedPhotos = []
         selectedPhoto = nil
         isSelectMode = false
     }
 
+    /// 完成：把本次会话的改动一次性落盘（标签写盘在后台线程）
     func confirmSelectMode() {
-        selectModeSnapshot = []
+        persistSelectModeEdits()
+        editedOriginals = [:]
         selectedPhotos = []
         selectedPhoto = nil
         isSelectMode = false
+    }
+
+    private func persistSelectModeEdits() {
+        guard !editedOriginals.isEmpty, !sourcePath.isEmpty else { return }
+        let photoMap = buildPhotoIndexMap()
+
+        struct PendingWrite: Sendable {
+            let photo: PhotoEntry
+            let ratingChanged: Bool
+            let tagsChanged: Bool
+        }
+        var pending: [PendingWrite] = []
+        var ratingChangedAtAll = false
+
+        for (id, original) in editedOriginals {
+            guard let index = photoMap[id] else { continue }
+            let current = photos[index]
+            let ratingChanged = current.rating != original.rating
+            let tagsChanged = current.tags != original.tags
+            guard ratingChanged || tagsChanged else { continue }
+            if ratingChanged { ratingChangedAtAll = true }
+            pending.append(PendingWrite(photo: current, ratingChanged: ratingChanged, tagsChanged: tagsChanged))
+        }
+
+        guard !pending.isEmpty else { return }
+
+        // 评分落盘（UserDefaults，很快）；标签写扩展属性（较慢）放后台
+        let colorLookup = tagColorLookup
+        Task.detached(priority: .utility) {
+            let ratingService = RatingService.shared
+            let tagService = TagService.shared
+            for write in pending {
+                if write.ratingChanged {
+                    ratingService.setRating(write.photo.rating, for: write.photo.id)
+                }
+                if write.tagsChanged {
+                    _ = tagService.setTagsForPhotoPair(write.photo.tags, photo: write.photo, colorLookup: colorLookup)
+                }
+            }
+        }
+
+        if ratingChangedAtAll {
+            syncSidecar()
+        }
     }
 
     func selectPhoto(_ photo: PhotoEntry?) {
@@ -686,11 +597,6 @@ class PhotoStore: ObservableObject {
     func selectPhotoIds(_ ids: Set<String>) {
         selectedPhotos = ids
         selectedPhoto = filteredPhotos.first { ids.contains($0.id) }
-    }
-
-    func deselectAll() {
-        selectedPhotos = []
-        selectedPhoto = nil
     }
 
     func updateGridColumnCount(_ count: Int) {
@@ -924,18 +830,22 @@ class PhotoStore: ObservableObject {
         guard panel.runModal() == .OK, let selectedURL = panel.url else { return }
 
         let destinationDir = (selectedURL.path as NSString).appendingPathComponent(defaultFileName)
+        let photosToExport = filteredPhotos
+        let total = photosToExport.count
         isExporting = true
+        exportProgress = 0
 
-        Task {
+        // 文件拷贝在后台线程执行，避免阻塞主线程冻结 UI；进度回到主线程更新
+        Task.detached(priority: .utility) {
+            let fm = FileManager.default
             var exported = 0
             var failed = 0
-            let fm = FileManager.default
 
             if !fm.fileExists(atPath: destinationDir) {
                 try? fm.createDirectory(atPath: destinationDir, withIntermediateDirectories: true)
             }
 
-            for photo in filteredPhotos {
+            for (index, photo) in photosToExport.enumerated() {
                 let paths: [String] = [photo.jpgPath, photo.nefPath, photo.movPath].compactMap { $0 }
                 for sourcePath in paths {
                     let fileName = (sourcePath as NSString).lastPathComponent
@@ -947,69 +857,22 @@ class PhotoStore: ObservableObject {
                         failed += 1
                     }
                 }
+                let progress = Double(index + 1) / Double(max(total, 1))
+                await MainActor.run { [weak self] in self?.exportProgress = progress }
             }
 
-            let total = filteredPhotos.count
-            isExporting = false
-            if failed == 0 {
-                exportMessage = "已导出 \(total) 张照片（\(exported) 个文件）"
-            } else {
-                exportMessage = "导出完成：\(total) 张照片，\(exported) 个成功，\(failed) 个失败"
+            let finalExported = exported
+            let finalFailed = failed
+            await MainActor.run { [weak self] in
+                guard let self else { return }
+                self.isExporting = false
+                self.exportProgress = 0
+                if finalFailed == 0 {
+                    self.exportMessage = "已导出 \(total) 张照片（\(finalExported) 个文件）"
+                } else {
+                    self.exportMessage = "导出完成：\(total) 张照片，\(finalExported) 个成功，\(finalFailed) 个失败"
+                }
             }
         }
-    }
-
-    private var activePhotoIds: Set<String> {
-        if !selectedPhotos.isEmpty {
-            return selectedPhotos
-        }
-        if let selectedPhoto {
-            return [selectedPhoto.id]
-        }
-        return []
-    }
-
-    // MARK: - AI 快筛
-
-    private var aiProvider: LLMProvider = .mimo
-    private var aiModel: String = "mimo-v2.5"
-
-    func confirmAICull(provider: LLMProvider, model: String, speed: AICullSpeed) {
-        aiProvider = provider
-        aiModel = model
-
-        aiCullService.analyze(
-            photos: filteredPhotos.isEmpty ? photos : filteredPhotos,
-            mode: .llm,
-            provider: provider,
-            model: model,
-            speed: speed
-        )
-    }
-
-    func applyAICullResults(markedPhotos: [PhotoEntry]) {
-        // 把标记结果写回主数组
-        var markedLookup: [String: PhotoEntry] = [:]
-        markedLookup.reserveCapacity(markedPhotos.count)
-        for marked in markedPhotos {
-            markedLookup[marked.id] = marked
-        }
-
-        for i in photos.indices {
-            if let marked = markedLookup[photos[i].id] {
-                photos[i].workflowMark = marked.workflowMark
-                photos[i].aiResult = marked.aiResult
-            }
-        }
-        // 也写入 AI 分析结果
-        aiCullService.applyResults(to: &photos)
-        showingAICullReview = false
-        applyFilters()
-        syncSidecar()
-    }
-
-    func cancelAICull() {
-        aiCullService.cancel()
-        showingAICullReview = false
     }
 }

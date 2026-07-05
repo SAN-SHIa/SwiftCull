@@ -53,13 +53,13 @@ class FinderTagService {
         availableTags.sort { ($0.colorIndex > 0 ? $0.colorIndex : 99) < ($1.colorIndex > 0 ? $1.colorIndex : 99) }
 
         // Discover system tags in background to avoid blocking main thread
-        Task.detached(priority: .utility) { [weak self] in
+        Task.detached(priority: .utility) {
             let discovered = await Self.discoverSystemTagsBackground()
             guard !discovered.isEmpty else { return }
             await MainActor.run {
-                guard let self else { return }
+                let service = FinderTagService.shared
                 var merged = [String: Int]()
-                for tag in self.availableTags {
+                for tag in service.availableTags {
                     merged[tag.name] = tag.colorIndex
                 }
                 for (name, index) in discovered {
@@ -67,8 +67,8 @@ class FinderTagService {
                         merged[name] = index
                     }
                 }
-                self.availableTags = merged.map { FinderTag(name: $0.key, colorIndex: $0.value) }
-                self.availableTags.sort { ($0.colorIndex > 0 ? $0.colorIndex : 99) < ($1.colorIndex > 0 ? $1.colorIndex : 99) }
+                service.availableTags = merged.map { FinderTag(name: $0.key, colorIndex: $0.value) }
+                service.availableTags.sort { ($0.colorIndex > 0 ? $0.colorIndex : 99) < ($1.colorIndex > 0 ? $1.colorIndex : 99) }
             }
         }
     }

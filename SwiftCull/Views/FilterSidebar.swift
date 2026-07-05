@@ -12,7 +12,6 @@ struct FilterSidebar: View {
                     tagSection
                     fileTypeSection
                     dateFilterSection
-                    aiFilterSection
                     sortSection
                 }
                 .padding(.horizontal, 12)
@@ -213,16 +212,16 @@ struct FilterSidebar: View {
     // MARK: - 快捷预设
 
     private var presetButtons: some View {
-        HStack(spacing: 4) {
-            ForEach([DatePreset.today, .yesterday, .last7Days, .last30Days, .thisMonth, .lastMonth, .custom], id: \.self) { preset in
+        FlowLayout(spacing: 6) {
+            ForEach([DatePreset.today, .yesterday, .last7Days, .last30Days, .custom], id: \.self) { preset in
                 Button {
                     applyPreset(preset)
                     scheduleFilter()
                 } label: {
                     Text(preset.displayName)
-                        .font(.system(size: 10, weight: store.filterOptions.activePreset == preset ? .semibold : .regular))
-                        .padding(.horizontal, 6)
-                        .padding(.vertical, 3)
+                        .font(.system(size: 11, weight: store.filterOptions.activePreset == preset ? .semibold : .regular))
+                        .padding(.horizontal, 9)
+                        .padding(.vertical, 4)
                         .background(
                             Capsule().fill(store.filterOptions.activePreset == preset
                                            ? Color.accentColor.opacity(0.15)
@@ -240,6 +239,7 @@ struct FilterSidebar: View {
                 .buttonStyle(.plain)
             }
         }
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 
     // MARK: - 日期输入
@@ -365,39 +365,6 @@ struct FilterSidebar: View {
         recentDateRangesData = (try? JSONEncoder().encode(recent)) ?? Data()
     }
 
-    private var aiFilterSection: some View {
-        GlassCard {
-            VStack(alignment: .leading, spacing: 10) {
-                SectionHeader(icon: "brain.head.profile", title: "AI 筛选")
-
-                FlowLayout(spacing: 6) {
-                    ForEach(AIFilter.allCases) { filter in
-                        FilterChip(
-                            title: filter.displayName,
-                            icon: aiFilterIcon(filter),
-                            isSelected: store.filterOptions.aiFilter == filter
-                        ) {
-                            store.filterOptions.aiFilter = filter
-                            scheduleFilter()
-                        }
-                    }
-                }
-            }
-        }
-        .onChange(of: store.filterOptions.aiFilter) { _, _ in
-            scheduleFilter()
-        }
-    }
-
-    private func aiFilterIcon(_ filter: AIFilter) -> String {
-        switch filter {
-        case .all: return "line.3.horizontal.decrease.circle"
-        case .aiReject: return "xmark.circle"
-        case .aiPass: return "checkmark.circle"
-        case .aiNotAnalyzed: return "questionmark.circle"
-        }
-    }
-
     private var sortSection: some View {
         GlassCard {
             VStack(alignment: .leading, spacing: 10) {
@@ -494,26 +461,35 @@ struct FilterSidebar: View {
                     Button {
                         store.exportFilteredPhotos()
                     } label: {
-                        HStack {
-                            if store.isExporting {
-                                ProgressView()
-                                    .scaleEffect(0.6)
-                                    .frame(width: 14, height: 14)
-                            } else {
-                                Image(systemName: "square.and.arrow.up")
-                                    .font(.system(size: 13, weight: .medium))
+                        VStack(spacing: 5) {
+                            HStack(spacing: 6) {
+                                if store.isExporting {
+                                    Text("导出中 \(Int(store.exportProgress * 100))%")
+                                        .font(.system(size: 13, weight: .medium))
+                                        .monospacedDigit()
+                                } else {
+                                    Image(systemName: "square.and.arrow.up")
+                                        .font(.system(size: 13, weight: .medium))
+                                    Text("导出筛选结果")
+                                        .font(.system(size: 13, weight: .medium))
+                                }
                             }
-                            Text(store.isExporting ? "导出中..." : "导出筛选结果")
-                                .font(.system(size: 13, weight: .medium))
+
+                            if store.isExporting {
+                                ProgressView(value: store.exportProgress)
+                                    .progressViewStyle(.linear)
+                                    .tint(Color.accentColor)
+                            }
                         }
                         .frame(maxWidth: .infinity)
                         .padding(.vertical, 8)
+                        .padding(.horizontal, 10)
                         .background(Color.accentColor.opacity(0.15))
                         .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
                     }
                     .buttonStyle(.plain)
                     .disabled(store.isExporting || store.photoCount == 0)
-                    .opacity(store.isExporting ? 0.6 : 1.0)
+                    .animation(.smooth(duration: 0.2), value: store.isExporting)
                 }
             }
         }
