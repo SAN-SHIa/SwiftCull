@@ -546,8 +546,9 @@ struct PhotoGridContent: View {
     let columns: [GridItem]
     let groupingMode: PhotoGroupingMode
     let isSelectMode: Bool
-    @Binding var lastSelectedPhoto: PhotoEntry?
-    @State private var itemFrames: [String: CGRect] = [:]
+     @Binding var lastSelectedPhoto: PhotoEntry?
+    /// 非观察的帧缓存（引用型），避免滚动时用 @State 逐帧触发整个网格重算。
+    @State private var frameStore = FrameStore()
     @State private var dragStart: CGPoint?
     @State private var dragCurrent: CGPoint?
     @State private var dragBaselineSelection: Set<String> = []
@@ -629,16 +630,16 @@ struct PhotoGridContent: View {
                     .contentShape(Rectangle())
                     .simultaneousGesture(gridInteractionGesture)
                     .onPreferenceChange(PhotoItemFramePreferenceKey.self) { frames in
-                        let latest: [String: CGRect]
+                        // 与原逻辑一致，仅把存储从 @State 换成非观察的 FrameStore：
+                        // 写入它不触发 body 失效与 LazyVGrid 重新布局，从根本上消除滚动逐帧重算。
+                        // 非拖拽态整体替换为当前可见帧（规模有限），拖拽态累积以覆盖已滚出视口的卡片。
                         if dragStart == nil {
-                            itemFrames = frames
-                            latest = frames
+                            frameStore.frames = frames
                         } else {
-                            itemFrames.merge(frames, uniquingKeysWith: { _, new in new })
-                            latest = itemFrames
+                            frameStore.frames.merge(frames, uniquingKeysWith: { _, new in new })
                             updateDragSelection()
                         }
-                        if let count = columnCount(from: latest) {
+                        if let count = columnCount(from: frameStore.frames) {
                             store.updateGridColumnCount(count)
                         }
                     }
@@ -655,7 +656,7 @@ struct PhotoGridContent: View {
                     updateGridColumnCount(width: geometry.size.width)
                 }
                 .onChange(of: store.filteredPhotosVersion) { _, _ in
-                    itemFrames = [:]
+                    frameStore.frames.removeAll(keepingCapacity: true)
                     cachedPhotoIds = Set(store.filteredPhotos.map(\.id))
                 }
             }
@@ -681,7 +682,6 @@ struct PhotoGridContent: View {
             isPrimary: store.selectedPhoto?.id == photo.id,
             isSelectMode: isSelectMode
         )
-        .environmentObject(store)
         .id(photo.id)
         .onAppear {
             store.preloadThumbnails(around: photo, size: gridSize)
@@ -758,7 +758,7 @@ struct PhotoGridContent: View {
 
     /// 命中反查：点击落点对应的照片
     private func handleTap(at point: CGPoint) {
-        guard let id = itemFrames.first(where: { $0.value.contains(point) })?.key,
+        guard let id = frameStore.frames.first(where: { $0.value.contains(point) })?.key,
               let photo = store.filteredPhotos.first(where: { $0.id == id }) else { return }
         handleTap(photo: photo)
     }
@@ -818,7 +818,7 @@ struct PhotoGridContent: View {
         }
         lastDragUpdateTime = now
 
-        let rectSelectedIds = itemFrames.reduce(into: Set<String>()) { result, item in
+        let rectSelectedIds = frameStore.frames.reduce(into: Set<String>()) { result, item in
             guard cachedPhotoIds.contains(item.key) else { return }
             if item.value.intersects(selectionRect) {
                 result.insert(item.key)
@@ -900,6 +900,13 @@ private enum DragSelectionMode {
     case replace
     case add
     case toggle
+}
+
+/// 非观察的引用型帧缓存：保存卡片在网格内容坐标系下的布局帧，供「点击命中反查」与
+/// 「拖拽框选」读取。因不是 @State/@Published，写入它不会触发 SwiftUI 视图失效，
+/// 从根本上消除滚动时逐帧全量重算（原实现用 @State 存帧，每帧都触发整个网格重建）。
+private final class FrameStore {
+    var frames: [String: CGRect] = [:]
 }
 
 struct PhotoItemFramePreferenceKey: PreferenceKey {

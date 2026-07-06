@@ -45,7 +45,7 @@ struct KeycapView: View {
 }
 
 private struct ShortcutHintItem: Identifiable {
-    let id = UUID()
+    var id: String { label }
     let keys: [String]
     let label: String
 }

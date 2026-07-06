@@ -6,7 +6,6 @@ struct SelectablePhotoCardView: View {
     let isSelected: Bool
     let isPrimary: Bool
     let isSelectMode: Bool
-    @EnvironmentObject var store: PhotoStore
 
     var body: some View {
         VStack(spacing: 0) {
