@@ -45,7 +45,7 @@ struct KeycapView: View {
 }
 
 private struct ShortcutHintItem: Identifiable {
-    let id = UUID()
+    var id: String { label }
     let keys: [String]
     let label: String
 }
@@ -81,18 +81,27 @@ struct ShortcutHintBar: View {
     }
 
     private var contextTitle: String {
+        if store.viewMode == .single { return "大图浏览" }
         if store.isSelectMode { return "批量操作" }
         if store.selectedPhoto != nil { return "浏览" }
         return "提示"
     }
 
     private var contextIcon: String {
+        if store.viewMode == .single { return "photo.fill" }
         if store.isSelectMode { return "checkmark.circle.fill" }
         if store.selectedPhoto != nil { return "hand.point.up.left.fill" }
         return "lightbulb.fill"
     }
 
     private var hints: [ShortcutHintItem] {
+        if store.viewMode == .single {
+            return [
+                ShortcutHintItem(keys: ["E"], label: "退出大图浏览"),
+                ShortcutHintItem(keys: ["Space"], label: "快速预览"),
+                ShortcutHintItem(keys: ["←", "→"], label: "上一张 / 下一张")
+            ]
+        }
         if store.isSelectMode {
             return [
                 ShortcutHintItem(keys: ["Q"], label: "完成并退出"),

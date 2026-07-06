@@ -60,6 +60,8 @@ class PhotoStore: ObservableObject {
     private var gridColumnCount = 1
     private var currentLoadID = UUID()
     private var lastPreheatKey: String?
+    /// filteredPhotos 的 id→下标缓存，随 applyFilters 重建，供滚动预热/方向键导航 O(1) 定位。
+    private var filteredIndexById: [String: Int] = [:]
     private var tagColorLookup: [String: Int] {
         finderTagService.tagColorLookup
     }
@@ -290,14 +292,17 @@ class PhotoStore: ObservableObject {
     }
 
     func preloadThumbnails(around photo: PhotoEntry, size: CGFloat) {
-        guard let centerIndex = filteredPhotos.firstIndex(where: { $0.id == photo.id }) else { return }
+        guard let centerIndex = filteredIndexById[photo.id] else { return }
         let quantizedSize = ThumbnailService.quantizedSize(size)
-        let key = "\(photo.id)|\(quantizedSize)|\(gridColumnCount)"
+        let columns = max(1, gridColumnCount)
+        // 按「行」去重：同一行内多张卡片相继 onAppear 只触发一次预热，减少重复窗口扫描。
+        let row = centerIndex / columns
+        let key = "\(row)|\(quantizedSize)|\(columns)"
         guard key != lastPreheatKey else { return }
         lastPreheatKey = key
 
-        let before = gridColumnCount * 2
-        let after = gridColumnCount * 4
+        let before = columns * 2
+        let after = columns * 4
         let lowerBound = max(0, centerIndex - before)
         let upperBound = min(filteredPhotos.count, centerIndex + after + 1)
 
@@ -349,6 +354,7 @@ class PhotoStore: ObservableObject {
         }
 
         filteredPhotos = sortPhotos(result)
+        filteredIndexById = buildFilteredIndexMap()
         filteredPhotosVersion &+= 1
     }
 
@@ -668,7 +674,7 @@ class PhotoStore: ObservableObject {
         guard !filteredPhotos.isEmpty else { return }
         let currentIndex: Int
         if let current = selectedPhoto,
-           let index = filteredPhotos.firstIndex(where: { $0.id == current.id }) {
+           let index = filteredIndexById[current.id] {
             currentIndex = index
         } else {
             currentIndex = offset >= 0 ? -1 : filteredPhotos.count

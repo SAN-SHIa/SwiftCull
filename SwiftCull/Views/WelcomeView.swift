@@ -95,6 +95,8 @@ struct ShortcutGuideView: View {
         ("拖拽框选", "鼠标框选多张照片"),
         ("Space", "Quick Look 预览"),
         ("E", "网格 / 大图切换"),
+        ("Q", "完成并退出多选"),
+        ("双指捏合", "缩放网格缩略图"),
         ("大图缩放", "捏合 / 双击 / ＋ － 缩放，拖拽平移"),
         ("Tab", "切换侧边栏"),
         ("1-5", "设置评分"),
@@ -195,6 +197,12 @@ struct PhotoSinglePreviewView: View {
         }
         .overlay(alignment: .bottom) { infoBar }
         .overlay(alignment: .topTrailing) { zoomControls }
+        .safeAreaInset(edge: .top, spacing: 0) {
+            VStack(spacing: 0) {
+                ShortcutHintBar()
+                Divider()
+            }
+        }
         .onChange(of: photo.id) { _, _ in resetZoom() }
     }
 
