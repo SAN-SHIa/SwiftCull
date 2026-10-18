@@ -14,7 +14,7 @@
     <title>SwiftCull — Make time for your next shot</title>
     <link rel="canonical" href="https://san-shia.github.io/SwiftCull/">
     <link rel="icon" type="image/png" href="./assets/app-icon.png">
-    <link rel="preload" as="image" href="./assets/light.webp">
+    <link rel="preload" as="image" href="./assets/light.webp" imagesrcset="./assets/light.webp 1600w, ./assets/light@2x.webp 2926w" imagesizes="(max-width: 600px) calc(100vw - 48px), (max-width: 1100px) calc(100vw - 144px), 1144px">
     <link rel="stylesheet" href="./styles.css">
     <script src="./translations.js" defer></script>
     <script src="./script.js" defer></script>
@@ -44,6 +44,7 @@
 
     <a class="skip-link" href="#main" data-i18n="skip">Skip to content</a>
     <header class="site-header">
+      <div class="reading-progress" aria-hidden="true"><span></span></div>
       <div class="header-inner">
         <a class="brand" href="#" aria-label="SwiftCull home" data-i18n-aria-label="brand.home">
           <img src="./assets/app-icon.png" width="38" height="38" alt="">
@@ -70,9 +71,9 @@
 
     <main id="main">
       <section class="hero" aria-labelledby="hero-title">
-        <div class="hero-copy">
+        <div class="hero-copy" data-reveal>
           <h1 id="hero-title" data-i18n="hero.title">Find the photos<br>worth keeping.</h1>
-          <p data-i18n="hero.description">A lightweight, free photo culling app, made for Mac.<br>Browse, rate, filter, and export. Make time for your next shot.</p>
+          <p data-i18n="hero.description">A lightweight, free photo culling app, made for Mac.<br> Browse, rate, filter, and export. Make time for your next shot.</p>
           <div class="hero-actions">
             <a class="button" href="https://github.com/SAN-SHIa/SwiftCull/releases/latest" target="_blank" rel="noopener noreferrer" data-i18n="hero.download"><svg class="icon apple-icon"><use href="#i-apple"></use></svg>Download for Mac<svg class="icon button-arrow"><use href="#i-download"></use></svg></a>
             <a class="text-link" href="#features" data-i18n="hero.explore">Explore the features<svg class="icon"><use href="#i-arrow"></use></svg></a>
@@ -80,12 +81,12 @@
           <p class="hero-meta" data-i18n="hero.meta">macOS 14.0 or later<span aria-hidden="true"></span>Free &amp; open source</p>
         </div>
 
-        <div class="hero-stage">
+        <div class="hero-stage" data-reveal>
           <div class="photo-print print-left" aria-hidden="true"><img src="./assets/photo-forest.webp" width="300" height="330" alt=""><div class="print-mark"><span></span><span></span><span></span><span></span><span></span></div></div>
           <div class="photo-print print-right" aria-hidden="true"><img src="./assets/photo-road.webp" width="300" height="330" alt=""><div class="print-mark"><span></span><span></span><span></span><span></span><span></span></div></div>
           <div class="hero-window">
-            <button class="screenshot-button" type="button" data-zoom="./assets/light.webp" data-zoom-alt="SwiftCull in light appearance: photo grid, star ratings, and Finder tag filters" aria-label="Enlarge the SwiftCull screenshot" data-i18n-aria-label="zoom.hero">
-              <img id="hero-screenshot" src="./assets/light.webp" width="1280" height="779" alt="SwiftCull in light appearance: photo grid, star ratings, and Finder tag filters" fetchpriority="high">
+            <button class="screenshot-button" type="button" data-zoom="./assets/light@2x.webp" data-zoom-alt="SwiftCull in light appearance: photo grid, star ratings, and Finder tag filters" aria-label="Enlarge the SwiftCull screenshot" data-i18n-aria-label="zoom.hero">
+              <img id="hero-screenshot" src="./assets/light.webp" srcset="./assets/light.webp 1600w, ./assets/light@2x.webp 2926w" sizes="(max-width: 600px) calc(100vw - 48px), (max-width: 1100px) calc(100vw - 144px), 1144px" width="2926" height="1780" alt="SwiftCull in light appearance: photo grid, star ratings, and Finder tag filters" fetchpriority="high">
               <span class="zoom-hint" data-i18n="zoom.hint"><svg class="icon"><use href="#i-expand"></use></svg>View screenshot</span>
             </button>
           </div>
@@ -94,8 +95,8 @@
       </section>
 
       <section class="intro content-width" aria-labelledby="intro-title">
-        <div class="intro-heading"><h2 id="intro-title" data-i18n="intro.title">A folder full of photos.<br>A simpler way through.</h2><p data-i18n="intro.description">Start with a folder, not a complicated library.<br class="desktop-break">A trip, a shoot, or the everyday. Just open it and begin.</p></div>
-        <div class="principles">
+        <div class="intro-heading" data-reveal><h2 id="intro-title" data-i18n="intro.title">A folder full of photos.<br>A simpler way through.</h2><p data-i18n="intro.description">Start with a folder, not a complicated library.<br class="desktop-break">A trip, a shoot, or the everyday. Just open it and begin.</p></div>
+        <div class="principles" data-reveal>
           <div><svg class="icon"><use href="#i-apple"></use></svg><h3 data-i18n="principle.mac.title">Made for Mac</h3><p data-i18n="principle.mac.description">A native interface with Finder tags,<br>Quick Look, and familiar keyboard controls.</p></div>
           <div><svg class="icon"><use href="#i-folder"></use></svg><h3 data-i18n="principle.folder.title">Start with a folder</h3><p data-i18n="principle.folder.description">Browse your photo folders directly.<br>Keep your files right where they belong.</p></div>
           <div><svg class="icon"><use href="#i-github"></use></svg><h3 data-i18n="principle.open.title">Free. And open.</h3><p data-i18n="principle.open.description">Open source under the MIT License.<br>Use it, share feedback, or help make it better.</p></div>
@@ -104,30 +105,59 @@
 
       <section class="features" id="features" aria-labelledby="features-title">
         <div class="content-width">
-          <div class="section-heading"><div><h2 id="features-title" data-i18n="features.title">Everything you need.<br>Right where you need it.</h2></div><p data-i18n="features.description">See the details. Keep your favorites.<br>Give every choice a little more clarity.</p></div>
-          <div class="feature-tabs" role="tablist" aria-label="SwiftCull feature previews" data-i18n-aria-label="features.tabsLabel">
-            <button id="tab-browse" class="feature-tab" type="button" role="tab" aria-selected="true" aria-controls="feature-panel" data-feature="browse" data-i18n="tab.browse"><svg class="icon"><use href="#i-grid"></use></svg>Browse &amp; rate</button>
-            <button id="tab-filter" class="feature-tab" type="button" role="tab" aria-selected="false" aria-controls="feature-panel" data-feature="filter" tabindex="-1" data-i18n="tab.filter"><svg class="icon"><use href="#i-filter"></use></svg>Filter &amp; tag</button>
-            <button id="tab-info" class="feature-tab" type="button" role="tab" aria-selected="false" aria-controls="feature-panel" data-feature="info" tabindex="-1" data-i18n="tab.info"><svg class="icon"><use href="#i-info"></use></svg>Photo details</button>
-            <button id="tab-frame" class="feature-tab" type="button" role="tab" aria-selected="false" aria-controls="feature-panel" data-feature="frame" tabindex="-1" data-i18n="tab.frame"><svg class="icon"><use href="#i-frame"></use></svg>Frames &amp; watermarks</button>
-            <button id="tab-live" class="feature-tab" type="button" role="tab" aria-selected="false" aria-controls="feature-panel" data-feature="live" tabindex="-1" data-i18n="tab.live"><svg class="icon"><use href="#i-live"></use></svg>Video &amp; Live Photos</button>
-          </div>
-          <div class="feature-panel" id="feature-panel" role="tabpanel" aria-labelledby="tab-browse" tabindex="0">
-            <div class="feature-description" aria-live="polite"><div><h3 id="feature-title" data-i18n="feature.browse.title">See the whole shoot. Mark the standouts.</h3><p id="feature-description" data-i18n="feature.browse.description">Browse in a grid or get closer in a large preview. Rate with 1–5 stars and keep batch edits organized.</p></div><span class="feature-shortcut" id="feature-shortcut"><kbd>E</kbd>Large preview<kbd>1–5</kbd>Rate</span></div>
-            <button class="screenshot-button feature-media" type="button" data-zoom="./assets/dark.webp" data-zoom-alt="SwiftCull photo grid with browsing and star ratings" aria-label="Enlarge the current feature screenshot" data-i18n-aria-label="zoom.feature"><img id="feature-screenshot" src="./assets/dark.webp" width="1280" height="779" alt="SwiftCull photo grid with browsing and star ratings" loading="lazy"><span class="zoom-hint" data-i18n="zoom.hint"><svg class="icon"><use href="#i-expand"></use></svg>View screenshot</span></button>
-          </div>
-          <p class="feature-footnote" data-i18n="features.footnote"><svg class="icon"><use href="#i-check"></use></svg>Actual screenshots from SwiftCull.</p>
+          <div class="section-heading" data-reveal><div><h2 id="features-title" data-i18n="features.title">Everything you need.<br>Right where you need it.</h2></div><p data-i18n="features.description">See the details. Keep your favorites.<br>Give every choice a little more clarity.</p></div>
+
         </div>
+        <div class="feature-sequence">
+        <div class="feature-gallery">
+          <div class="content-width feature-navigation">
+          <div class="feature-tabs" role="group" aria-label="SwiftCull feature previews" data-i18n-aria-label="features.tabsLabel">
+            <button id="tab-browse" class="feature-tab" type="button" aria-pressed="true" aria-controls="feature-browse" data-feature="browse" data-i18n="tab.browse"><svg class="icon"><use href="#i-grid"></use></svg>Browse &amp; rate</button>
+            <button id="tab-filter" class="feature-tab" type="button" aria-pressed="false" aria-controls="feature-filter" data-feature="filter" data-i18n="tab.filter"><svg class="icon"><use href="#i-filter"></use></svg>Filter &amp; tag</button>
+            <button id="tab-info" class="feature-tab" type="button" aria-pressed="false" aria-controls="feature-info" data-feature="info" data-i18n="tab.info"><svg class="icon"><use href="#i-info"></use></svg>Photo details</button>
+            <button id="tab-frame" class="feature-tab" type="button" aria-pressed="false" aria-controls="feature-frame" data-feature="frame" data-i18n="tab.frame"><svg class="icon"><use href="#i-frame"></use></svg>Frames &amp; watermarks</button>
+            <button id="tab-live" class="feature-tab" type="button" aria-pressed="false" aria-controls="feature-live" data-feature="live" data-i18n="tab.live"><svg class="icon"><use href="#i-live"></use></svg>Video &amp; Live Photos</button>
+          </div>
+          </div>
+          <div class="feature-track" id="feature-track" role="region" aria-label="SwiftCull features, horizontally scrollable" data-i18n-aria-label="features.gallery" tabindex="0">
+            <article class="feature-slide" id="feature-browse" aria-labelledby="title-browse" data-slide="browse">
+              <div class="feature-description"><div><h3 id="title-browse" data-i18n="feature.browse.title">See the whole shoot. Mark the standouts.</h3><p data-i18n="feature.browse.description">Browse in a grid or get closer in a large preview. Rate with 1–5 stars and keep batch edits organized.</p></div><span class="feature-shortcut"><kbd>E</kbd>Large preview<kbd>1–5</kbd>Rate</span></div>
+              <button class="screenshot-button feature-media" type="button" data-zoom="./assets/dark@2x.webp" data-zoom-alt="SwiftCull photo grid with browsing and star ratings" aria-label="Enlarge the current feature screenshot" data-i18n-aria-label="zoom.feature"><img src="./assets/dark.webp" srcset="./assets/dark.webp 1600w, ./assets/dark@2x.webp 2926w" sizes="(max-width: 600px) calc(100vw - 56px), (max-width: 1000px) 82vw, 960px" width="2926" height="1780" alt="SwiftCull photo grid with browsing and star ratings" data-i18n-alt="feature.browse.alt" loading="lazy" decoding="async"><span class="zoom-hint" data-i18n="zoom.hint"><svg class="icon"><use href="#i-expand"></use></svg>View screenshot</span></button>
+            </article>
+            <article class="feature-slide" id="feature-filter" aria-labelledby="title-filter" data-slide="filter">
+              <div class="feature-description"><div><h3 id="title-filter" data-i18n="feature.filter.title">Narrow it down. Find your favorites.</h3><p data-i18n="feature.filter.description">Combine ratings, Finder tags, file type, filename, and capture date to find the photos you want to keep.</p></div><span class="feature-shortcut"><kbd>⌘ A</kbd>Select results<kbd>Q</kbd>Save batch edits</span></div>
+              <button class="screenshot-button feature-media" type="button" data-zoom="./assets/filter@2x.webp" data-zoom-alt="SwiftCull combining star ratings, Finder tags, and file type filters" aria-label="Enlarge the current feature screenshot" data-i18n-aria-label="zoom.feature"><img src="./assets/filter.webp" srcset="./assets/filter.webp 1600w, ./assets/filter@2x.webp 2926w" sizes="(max-width: 600px) calc(100vw - 56px), (max-width: 1000px) 82vw, 960px" width="2926" height="1780" alt="SwiftCull combining star ratings, Finder tags, and file type filters" data-i18n-alt="feature.filter.alt" loading="lazy" decoding="async"><span class="zoom-hint" data-i18n="zoom.hint"><svg class="icon"><use href="#i-expand"></use></svg>View screenshot</span></button>
+            </article>
+            <article class="feature-slide" id="feature-info" aria-labelledby="title-info" data-slide="info">
+              <div class="feature-description"><div><h3 id="title-info" data-i18n="feature.info.title">The details behind every frame.</h3><p data-i18n="feature.info.description">See your camera, lens, and shooting settings beside a large preview. Check ratings, tags, and related files in one place.</p></div><span class="feature-shortcut"><kbd>Space</kbd>Quick Look<kbd>⌘ ⇧ B</kbd>Toggle inspector</span></div>
+              <button class="screenshot-button feature-media" type="button" data-zoom="./assets/photo-info@2x.webp" data-zoom-alt="SwiftCull large photo preview with camera settings and file information" aria-label="Enlarge the current feature screenshot" data-i18n-aria-label="zoom.feature"><img src="./assets/photo-info.webp" srcset="./assets/photo-info.webp 1600w, ./assets/photo-info@2x.webp 2926w" sizes="(max-width: 600px) calc(100vw - 56px), (max-width: 1000px) 82vw, 960px" width="2926" height="1780" alt="SwiftCull large photo preview with camera settings and file information" data-i18n-alt="feature.info.alt" loading="lazy" decoding="async"><span class="zoom-hint" data-i18n="zoom.hint"><svg class="icon"><use href="#i-expand"></use></svg>View screenshot</span></button>
+            </article>
+            <article class="feature-slide" id="feature-frame" aria-labelledby="title-frame" data-slide="frame">
+              <div class="feature-description"><div><h3 id="title-frame" data-i18n="feature.frame.title">Give your favorites a finishing touch.</h3><p data-i18n="feature.frame.description">Choose a frame or watermark preset. Adjust the canvas, margins, text, or logo, preview each photo, and export a batch.</p></div><span class="feature-shortcut"><span class="feature-fact">15</span>Watermark presets<span class="feature-fact">6</span>Canvas ratios</span></div>
+              <button class="screenshot-button feature-media" type="button" data-zoom="./assets/watermark@2x.webp" data-zoom-alt="SwiftCull frame and watermark editor with photo preview, presets, and export controls" aria-label="Enlarge the current feature screenshot" data-i18n-aria-label="zoom.feature"><img src="./assets/watermark.webp" srcset="./assets/watermark.webp 1600w, ./assets/watermark@2x.webp 2926w" sizes="(max-width: 600px) calc(100vw - 56px), (max-width: 1000px) 82vw, 960px" width="2926" height="1780" alt="SwiftCull frame and watermark editor with photo preview, presets, and export controls" data-i18n-alt="feature.frame.alt" loading="lazy" decoding="async"><span class="zoom-hint" data-i18n="zoom.hint"><svg class="icon"><use href="#i-expand"></use></svg>View screenshot</span></button>
+            </article>
+            <article class="feature-slide" id="feature-live" aria-labelledby="title-live" data-slide="live">
+              <div class="feature-description"><div><h3 id="title-live" data-i18n="feature.live.title">Let a moment keep moving.</h3><p data-i18n="feature.live.description">Preview linked videos, choose a 0.5–3 second clip and cover frame, then export a HEIC + MOV Live Photo or add it to Photos.</p></div><span class="feature-shortcut"><kbd>V</kbd>Open video<kbd>P</kbd>Preview clip</span></div>
+              <button class="screenshot-button feature-media" type="button" data-zoom="./assets/video-live@2x.webp" data-zoom-alt="SwiftCull Live Photo editor with video preview, clip timeline, and cover selection" aria-label="Enlarge the current feature screenshot" data-i18n-aria-label="zoom.feature"><img src="./assets/video-live.webp" srcset="./assets/video-live.webp 1600w, ./assets/video-live@2x.webp 2926w" sizes="(max-width: 600px) calc(100vw - 56px), (max-width: 1000px) 82vw, 960px" width="2926" height="1780" alt="SwiftCull Live Photo editor with video preview, clip timeline, and cover selection" data-i18n-alt="feature.live.alt" loading="lazy" decoding="async"><span class="zoom-hint" data-i18n="zoom.hint"><svg class="icon"><use href="#i-expand"></use></svg>View screenshot</span></button>
+            </article>
+          </div>
+          <div class="feature-gallery-footer content-width">
+            <div class="feature-scroll-cue"><span data-i18n="features.hint">Scroll down to explore</span><div class="feature-progress" aria-hidden="true"><span></span></div></div>
+            <div class="feature-controls"><span class="feature-count" aria-live="polite" aria-atomic="true" aria-label="Feature 1 of 5">1 / 5</span><button class="icon-button feature-previous" type="button" aria-label="Previous feature" data-i18n-aria-label="features.previous" aria-controls="feature-track" disabled><svg class="icon previous-arrow" aria-hidden="true"><use href="#i-arrow"></use></svg></button><button class="icon-button feature-next" type="button" aria-label="Next feature" data-i18n-aria-label="features.next" aria-controls="feature-track"><svg class="icon " aria-hidden="true"><use href="#i-arrow"></use></svg></button></div>
+          </div>
+        </div>
+        </div>
+        <p class="feature-footnote" data-i18n="features.footnote"><svg class="icon"><use href="#i-check"></use></svg>Actual screenshots from SwiftCull.</p>
       </section>
 
       <section class="workflow content-width" id="workflow" aria-labelledby="workflow-title">
         <div class="section-heading"><div><h2 id="workflow-title" data-i18n="workflow.title">Less sorting.<br>More shooting.</h2></div><p data-i18n="workflow.description">From a full folder to your favorites.<br>Three simple steps to get there.</p></div>
-        <div class="steps">
+        <div class="steps" data-reveal>
           <div class="step"><span class="step-number">01</span><h3 data-i18n="step.open.title">Open a folder</h3><p data-i18n="step.open.description">Drop in a photo folder, or press <kbd>⌘ O</kbd>.<br>No new library to set up first.</p></div>
           <div class="step"><span class="step-number">02</span><h3 data-i18n="step.rate.title">Mark your favorites</h3><p data-i18n="step.rate.description">Press <kbd>1</kbd>–<kbd>5</kbd> to rate, or add Finder tags.<br>Press <kbd>Q</kbd> to save batch annotations.</p></div>
           <div class="step"><span class="step-number">03</span><h3 data-i18n="step.export.title">Filter. Export. Go.</h3><p data-i18n="step.export.description">Narrow by rating, tag, or type, then copy or export.<br>Add a frame or watermark when you need one.</p></div>
         </div>
-        <div class="rating-demo" id="rating-demo" role="region" aria-labelledby="demo-title" tabindex="0" aria-describedby="demo-instructions">
+        <div class="rating-demo" id="rating-demo" data-reveal role="region" aria-labelledby="demo-title" tabindex="0" aria-describedby="demo-instructions">
           <div class="demo-header"><div><svg class="icon"><use href="#i-star"></use></svg><h3 id="demo-title" data-i18n="demo.title">Try a little photo culling.</h3></div><span data-i18n="demo.label">Interactive demo</span></div>
           <div class="demo-photos" role="group" aria-label="Choose a demo photo" data-i18n-aria-label="demo.photosLabel">
             <button class="demo-photo" type="button" data-photo="0" aria-pressed="true" aria-label="Select photo: Among the trees"><span class="demo-image"><img src="./assets/photo-forest.webp" width="300" height="330" alt="Sunlight falling through a green bamboo forest" loading="lazy" data-i18n-alt="photo.0.alt"><span class="selection-check"><svg class="icon"><use href="#i-check"></use></svg></span></span><span class="photo-caption"><span data-i18n="photo.0.name">Among the trees</span><span class="photo-stars" aria-label="Not rated"></span></span></button>
@@ -141,7 +171,7 @@
       </section>
 
       <section class="download-section" id="download" aria-labelledby="download-title">
-        <div class="download-inner content-width">
+        <div class="download-inner content-width" data-reveal>
           <img class="download-icon" src="./assets/app-icon.png" width="100" height="100" alt="SwiftCull app icon" loading="lazy" data-i18n-alt="brand.icon">
           <h2 id="download-title" data-i18n="download.title">Your next photo session.<br>Meet your new culling tool.</h2>
           <p data-i18n="download.description">A small, focused app for the photos you love.</p>
@@ -152,7 +182,7 @@
       </section>
 
       <section class="community content-width" id="contributors" aria-labelledby="community-title">
-        <div class="community-intro">
+        <div class="community-intro" data-reveal>
           <h2 id="community-title" data-i18n="community.title">Make SwiftCull<br>better, together.</h2>
           <div class="community-invitation">
             <p data-i18n="community.description">From your first issue to a pull request, every contribution helps. Code, design, docs, testing, and ideas are all welcome.</p>
@@ -162,11 +192,11 @@
             </div>
           </div>
         </div>
-        <div class="contributors-heading">
+        <div class="contributors-heading" data-reveal>
           <h3 data-i18n="community.contributors">Contributors</h3>
           <a class="text-link" href="https://github.com/SAN-SHIa/SwiftCull/graphs/contributors" target="_blank" rel="noopener noreferrer" data-i18n="community.all">View contributions on GitHub<svg class="icon"><use href="#i-arrow"></use></svg></a>
         </div>
-        <ul class="contributors-list">
+        <ul class="contributors-list" data-reveal>
           <li><a class="contributor" href="https://github.com/SAN-SHIa" target="_blank" rel="noopener noreferrer" aria-label="View SAN-SHIa on GitHub" data-i18n-aria-label="contributor.san-shia"><img src="./assets/contributors/san-shia.webp" width="56" height="56" alt="" loading="lazy"><span>SAN-SHIa</span></a></li>
           <li><a class="contributor" href="https://github.com/ChenApr" target="_blank" rel="noopener noreferrer" aria-label="View ChenApr on GitHub" data-i18n-aria-label="contributor.chenapr"><img src="./assets/contributors/chenapr.webp" width="56" height="56" alt="" loading="lazy"><span>ChenApr</span></a></li>
           <li><a class="contributor" href="https://github.com/Zephyr-777" target="_blank" rel="noopener noreferrer" aria-label="View Zephyr-777 on GitHub" data-i18n-aria-label="contributor.zephyr-777"><img src="./assets/contributors/zephyr-777.webp" width="56" height="56" alt="" loading="lazy"><span>Zephyr-777</span></a></li>
@@ -176,8 +206,8 @@
       </section>
 
       <section class="faq content-width" id="faq" aria-labelledby="faq-title">
-        <div class="faq-heading"><h2 id="faq-title" data-i18n="faq.title">A few things<br>before you start.</h2><p data-i18n="faq.contact">Have another question?<br><a class="text-link" href="https://github.com/SAN-SHIa/SwiftCull/issues" target="_blank" rel="noopener noreferrer">Ask us on GitHub<svg class="icon"><use href="#i-arrow"></use></svg></a></p></div>
-        <div class="faq-list">
+        <div class="faq-heading" data-reveal><h2 id="faq-title" data-i18n="faq.title">A few things<br>before you start.</h2><p data-i18n="faq.contact">Have another question?<br><a class="text-link" href="https://github.com/SAN-SHIa/SwiftCull/issues" target="_blank" rel="noopener noreferrer">Ask us on GitHub<svg class="icon"><use href="#i-arrow"></use></svg></a></p></div>
+        <div class="faq-list" data-reveal>
           <details><summary data-i18n="faq.free.question">Is SwiftCull really free?<svg class="icon"><use href="#i-plus"></use></svg></summary><div class="faq-answer" data-i18n="faq.free.answer"><p>Yes. SwiftCull is free to download and use, with source code available under the MIT License. Explore the code, report an issue, or contribute an improvement. Third-party assets and fonts retain their own licenses.</p></div></details>
           <details><summary data-i18n="faq.formats.question">Which systems and file formats are supported?<svg class="icon"><use href="#i-plus"></use></svg></summary><div class="faq-answer" data-i18n="faq.formats.answer"><p>SwiftCull requires macOS 14.0 (Sonoma) or later. Scanning currently supports JPEG, HEIC, HEIF, TIFF, and RAW formats including NEF, CR2, ARW, DNG, and RAF. Video formats include MOV, MP4, and AVI.</p><p>RAW decoding and video playback depend on macOS support for the specific camera format and codec. PNG and CR3 are not currently included in scanning.</p></div></details>
           <details><summary data-i18n="faq.originals.question">Will cropping change my original photos?<svg class="icon"><use href="#i-plus"></use></svg></summary><div class="faq-answer" data-i18n="faq.originals.answer"><p>Cropping is non-destructive: it leaves the original image content unchanged. Update a version or create a virtual copy; previews, copying, and export use the selected version. Frames and watermarks are also exported to new files.</p><p>Ratings are stored per photo folder. Finder tags are written to the metadata of associated files.</p></div></details>

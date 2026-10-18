@@ -27,3 +27,7 @@ Product screenshots come from the main branch's `assets/pics/previews/`. Photo d
 Website code uses the repository's [MIT License](LICENSE). Existing third-party assets retain their original licenses; see the project's [third-party notices](https://github.com/SAN-SHIa/SwiftCull/blob/main/THIRD_PARTY_NOTICES.md).
 
 The contributors section welcomes code, design, documentation, testing, and ideas. The acknowledgements include code and other contributions, based on GitHub records and maintainer confirmation. The GitHub contribution history reflects platform-recognized code commits, rather than every form of contribution. Profile pictures come from the contributors’ public GitHub profiles and are used for attribution. Their rights remain with the respective owners and are not covered by the website code’s MIT License.
+
+## Image quality and motion
+
+Product screenshots use 1600px and original 2926px WebP variants through `srcset`; the image viewer loads the full-size image. Photos and screenshots have rounded corners. Features pin below the header while vertical document scrolling moves the gallery horizontally. After the final feature, normal vertical page movement resumes; scrolling back reverses the sequence. Navigation buttons and keyboard controls move to the matching document position. Short viewports and reduced-motion preferences use the native horizontal gallery without pinning. Content groups reveal once on entry; reduced-motion preferences show content immediately and disable smooth gallery movement. No animation libraries are required.

@@ -52,7 +52,7 @@ window.SWIFTCULL_TRANSLATIONS = {
     "nav.source": "Source on GitHub",
     "nav.download": "Free download<svg class=\"icon\"><use href=\"#i-download\"></use></svg>",
     "hero.title": "Find the photos<br>worth keeping.",
-    "hero.description": "A lightweight, free photo culling app, made for Mac.<br>Browse, rate, filter, and export. Make time for your next shot.",
+    "hero.description": "A lightweight, free photo culling app, made for Mac.<br> Browse, rate, filter, and export. Make time for your next shot.",
     "hero.download": "<svg class=\"icon apple-icon\"><use href=\"#i-apple\"></use></svg>Download for Mac<svg class=\"icon button-arrow\"><use href=\"#i-download\"></use></svg>",
     "hero.explore": "Explore the features<svg class=\"icon\"><use href=\"#i-arrow\"></use></svg>",
     "hero.meta": "macOS 14.0 or later<span aria-hidden=\"true\"></span>Free &amp; open source",
@@ -144,7 +144,13 @@ window.SWIFTCULL_TRANSLATIONS = {
     "photo.0.alt": "Sunlight falling through a green bamboo forest",
     "photo.1.alt": "Temple eaves framed by green trees",
     "photo.2.alt": "An open road beneath a wide sky",
-    "photo.3.alt": "A blue boat resting beside a green lake"
+    "photo.3.alt": "A blue boat resting beside a green lake",
+    "features.previous": "Previous feature",
+    "features.next": "Next feature",
+    "features.gallery": "SwiftCull features, horizontally scrollable",
+    "features.hint": "Scroll down to explore",
+    "features.position": "Feature {current} of {total}",
+    "features.swipeHint": "Scroll sideways to explore"
   },
   "zh": {
     "page.title": "SwiftCull — 把时间留给拍摄",
@@ -288,6 +294,12 @@ window.SWIFTCULL_TRANSLATIONS = {
     "photo.0.alt": "阳光照进绿色竹林",
     "photo.1.alt": "绿树间的山寺屋檐",
     "photo.2.alt": "通向远方的公路与天空",
-    "photo.3.alt": "停泊在绿水边的小船"
+    "photo.3.alt": "停泊在绿水边的小船",
+    "features.previous": "上一个功能",
+    "features.next": "下一个功能",
+    "features.gallery": "SwiftCull 功能，可横向滚动浏览",
+    "features.hint": "向下滚动，探索更多功能",
+    "features.position": "第 {current} 项，共 {total} 项",
+    "features.swipeHint": "横向滚动，探索更多功能"
   }
 };

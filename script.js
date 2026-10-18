@@ -28,8 +28,18 @@ const heroZoom = heroScreenshot.closest("[data-zoom]");
 const menuToggle = document.querySelector(".menu-toggle");
 const mobileNav = document.querySelector("#mobile-nav");
 const featureTabs = [...document.querySelectorAll("[data-feature]")];
-const featurePanel = document.querySelector("#feature-panel");
-const featureScreenshot = document.querySelector("#feature-screenshot");
+const featureTrack = document.querySelector("#feature-track");
+const featureSlides = [...document.querySelectorAll("[data-slide]")];
+const featureSequence = document.querySelector(".feature-sequence");
+const featureGallery = document.querySelector(".feature-gallery");
+const featureDescriptions = [...document.querySelectorAll(".feature-description")];
+const featureScroll = { enabled: false, start: 0, distance: 0, top: 0 };
+let featureLayoutFrame = 0;
+let featureScrollFrame = 0;
+let pendingFeatureProgress = null;
+const previousFeature = document.querySelector(".feature-previous");
+const nextFeature = document.querySelector(".feature-next");
+const reducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)");
 const demo = document.querySelector("#rating-demo");
 const demoPhotos = [...document.querySelectorAll("[data-photo]")];
 const ratingButtons = [...document.querySelectorAll("[data-rating]")];
@@ -41,7 +51,8 @@ function setTheme(value, persist = true) {
   const source = `./assets/${theme}.webp`;
   if (heroScreenshot.getAttribute("src") !== source) heroScreenshot.src = source;
   heroScreenshot.alt = t(theme === "dark" ? "preview.altDark" : "preview.altLight");
-  heroZoom.dataset.zoom = source;
+  heroScreenshot.srcset = `./assets/${theme}.webp 1600w, ./assets/${theme}@2x.webp 2926w`;
+  heroZoom.dataset.zoom = `./assets/${theme}@2x.webp`;
   heroZoom.dataset.zoomAlt = heroScreenshot.alt;
   themeToggle.setAttribute("aria-label", t(theme === "dark" ? "theme.toLight" : "theme.toDark"));
   themeToggle.querySelector("use").setAttribute("href", theme === "dark" ? "#i-sun" : "#i-moon");
@@ -57,44 +68,183 @@ const features = {
   frame: { image: "watermark", keys: ["15", "6"] },
   live: { image: "video-live", keys: ["V", "P"] },
 };
-function renderFeature() {
-  const feature = features[selectedFeature];
-  const active = featureTabs.find((tab) => tab.dataset.feature === selectedFeature);
-  featureTabs.forEach((tab) => {
-    const selected = tab === active;
-    tab.setAttribute("aria-selected", String(selected));
-    tab.tabIndex = selected ? 0 : -1;
-  });
-  featurePanel.setAttribute("aria-labelledby", active.id);
-  const title = document.querySelector("#feature-title");
-  const description = document.querySelector("#feature-description");
-  title.dataset.i18n = `feature.${selectedFeature}.title`;
-  description.dataset.i18n = `feature.${selectedFeature}.description`;
-  title.textContent = t(title.dataset.i18n);
-  description.textContent = t(description.dataset.i18n);
-  const shortcuts = document.querySelector("#feature-shortcut");
-  shortcuts.replaceChildren();
-  feature.keys.forEach((key, index) => {
-    const value = document.createElement(selectedFeature === "frame" ? "span" : "kbd");
-    if (selectedFeature === "frame") value.className = "feature-fact";
-    value.textContent = key;
-    shortcuts.append(value, document.createTextNode(t(`feature.${selectedFeature}.key${index + 1}`)));
-  });
-  const source = `./assets/${feature.image}.webp`;
-  if (featureScreenshot.getAttribute("src") !== source) featureScreenshot.src = source;
-  featureScreenshot.alt = t(`feature.${selectedFeature}.alt`);
-  const zoom = featureScreenshot.closest("[data-zoom]");
-  zoom.dataset.zoom = source;
-  zoom.dataset.zoomAlt = featureScreenshot.alt;
+function updateFeatureNavigation() {
+  const index = featureSlides.findIndex((slide) => slide.dataset.slide === selectedFeature);
+  featureTabs.forEach((button) => button.setAttribute("aria-pressed", String(button.dataset.feature === selectedFeature)));
+  const activeButton = featureTabs[index];
+  const navigation = activeButton.parentElement;
+  const activeBounds = activeButton.getBoundingClientRect();
+  const navigationBounds = navigation.getBoundingClientRect();
+  if (activeBounds.left < navigationBounds.left || activeBounds.right > navigationBounds.right) {
+    navigation.scrollTo({ left: activeButton.offsetLeft - navigation.offsetLeft - (navigation.clientWidth - activeButton.clientWidth) / 2, behavior: "instant" });
+  }
+  previousFeature.disabled = index === 0;
+  nextFeature.disabled = index === featureSlides.length - 1;
+  const count = document.querySelector(".feature-count");
+  count.textContent = `${index + 1} / ${featureSlides.length}`;
+  count.setAttribute("aria-label", t("features.position", { current: index + 1, total: featureSlides.length }));
+  const distance = featureTrack.scrollWidth - featureTrack.clientWidth;
+  const progress = distance > 0 ? featureTrack.scrollLeft / distance : 0;
+  document.querySelector(".feature-progress > span").style.setProperty("--gallery-progress", String(progress));
 }
+
+function renderFeature() {
+  featureSlides.forEach((slide) => {
+    const key = slide.dataset.slide;
+    const shortcuts = slide.querySelector(".feature-shortcut");
+    shortcuts.replaceChildren();
+    features[key].keys.forEach((label, index) => {
+      const value = document.createElement(key === "frame" ? "span" : "kbd");
+      if (key === "frame") value.className = "feature-fact";
+      value.textContent = label;
+      shortcuts.append(value, document.createTextNode(t(`feature.${key}.key${index + 1}`)));
+    });
+    slide.querySelector("[data-zoom]").dataset.zoomAlt = t(`feature.${key}.alt`);
+  });
+  updateFeatureNavigation();
+}
+
+function moveToFeature(key, behavior = reducedMotion.matches ? "instant" : "smooth") {
+  selectedFeature = key;
+  const slide = featureSlides.find((item) => item.dataset.slide === key);
+  const padding = parseFloat(getComputedStyle(featureTrack).paddingLeft);
+  const left = Math.max(0, Math.min(featureTrack.scrollWidth - featureTrack.clientWidth, slide.offsetLeft - padding));
+  if (featureScroll.enabled) {
+    window.scrollTo({ top: featureScroll.start + left, behavior });
+  } else {
+    featureTrack.scrollTo({ left, behavior });
+  }
+  updateFeatureNavigation();
+}
+
 function selectFeature(button, focus = false) {
-  selectedFeature = button.dataset.feature;
-  renderFeature();
+  moveToFeature(button.dataset.feature);
   if (focus) {
     button.focus({ preventScroll: true });
-    button.scrollIntoView({ behavior: "instant", block: "nearest", inline: "nearest" });
+    const nav = button.parentElement;
+    nav.scrollTo({ left: button.offsetLeft - nav.offsetLeft - (nav.clientWidth - button.clientWidth) / 2, behavior: "instant" });
   }
 }
+
+let galleryFrame = 0;
+featureTrack.addEventListener("scroll", () => {
+  if (galleryFrame) return;
+  galleryFrame = requestAnimationFrame(() => {
+    galleryFrame = 0;
+    const padding = parseFloat(getComputedStyle(featureTrack).paddingLeft);
+    const nearest = featureSlides.reduce((best, slide) =>
+      Math.abs(slide.offsetLeft - padding - featureTrack.scrollLeft) < Math.abs(best.offsetLeft - padding - featureTrack.scrollLeft) ? slide : best);
+    selectedFeature = nearest.dataset.slide;
+    updateFeatureNavigation();
+  });
+}, { passive: true });
+
+previousFeature.addEventListener("click", () => {
+  const index = featureSlides.findIndex((slide) => slide.dataset.slide === selectedFeature);
+  moveToFeature(featureSlides[Math.max(0, index - 1)].dataset.slide);
+});
+nextFeature.addEventListener("click", () => {
+  const index = featureSlides.findIndex((slide) => slide.dataset.slide === selectedFeature);
+  moveToFeature(featureSlides[Math.min(featureSlides.length - 1, index + 1)].dataset.slide);
+});
+
+featureTrack.addEventListener("keydown", (event) => {
+  if (event.target !== featureTrack || event.altKey || event.ctrlKey || event.metaKey) return;
+  const current = featureSlides.findIndex((slide) => slide.dataset.slide === selectedFeature);
+  let next;
+  if (event.key === "ArrowRight") next = Math.min(current + 1, featureSlides.length - 1);
+  if (event.key === "ArrowLeft") next = Math.max(current - 1, 0);
+  if (event.key === "Home") next = 0;
+  if (event.key === "End") next = featureSlides.length - 1;
+  if (next !== undefined) { event.preventDefault(); moveToFeature(featureSlides[next].dataset.slide); }
+});
+
+// The sticky scene reserves one vertical pixel per horizontal pixel of travel.
+// Wheel, touch, Page Down, and reverse scrolling all use the browser's normal
+// document scroll; no wheel cancellation or body lock is involved.
+function configureFeatureScroll() {
+  featureLayoutFrame = 0;
+  const previous = { ...featureScroll };
+  const wasInside = pendingFeatureProgress !== null || (previous.enabled && Math.abs(featureGallery.getBoundingClientRect().top - previous.top) < 2);
+  const previousProgress = pendingFeatureProgress ?? (previous.enabled ? featureTrack.scrollLeft / previous.distance : 0);
+  pendingFeatureProgress = null;
+  featureSequence.classList.remove("is-pinned");
+  featureSequence.style.removeProperty("--sequence-height");
+  featureGallery.style.removeProperty("--slide-width");
+  featureDescriptions.forEach((description) => { description.style.minHeight = ""; });
+  featureScroll.enabled = false;
+
+  const headerHeight = document.querySelector(".header-inner").offsetHeight + 1;
+  const pinTop = headerHeight + 16;
+  const availableHeight = innerHeight - pinTop - 24;
+  const baseWidth = featureSlides[0].offsetWidth;
+  const minimumWidth = Math.min(baseWidth, 360);
+  let canPin = !reducedMotion.matches && CSS.supports("position", "sticky");
+
+  // Keep all images on a shared baseline, then shrink the gallery just enough
+  // to fit below the header. A short landscape viewport uses the native rail.
+  if (canPin) {
+    for (let pass = 0; pass < 4; pass += 1) {
+      featureDescriptions.forEach((description) => { description.style.minHeight = ""; });
+      const descriptionHeight = Math.max(...featureDescriptions.map((description) => description.offsetHeight));
+      featureDescriptions.forEach((description) => { description.style.minHeight = `${descriptionHeight}px`; });
+      const imageHeight = featureSlides[0].querySelector(".feature-media").offsetHeight;
+      const chromeHeight = featureGallery.offsetHeight - imageHeight + 16;
+      const width = Math.min(baseWidth, Math.floor((availableHeight - chromeHeight) * 1280 / 779));
+      if (width < minimumWidth) { canPin = false; break; }
+      featureGallery.style.setProperty("--slide-width", `${width}px`);
+    }
+    canPin = canPin && featureGallery.offsetHeight + 16 <= availableHeight + 2;
+  }
+
+  if (canPin) {
+    featureSequence.classList.add("is-pinned");
+    featureSequence.style.setProperty("--pin-top", `${pinTop}px`);
+    featureScroll.distance = featureTrack.scrollWidth - featureTrack.clientWidth;
+    featureSequence.style.setProperty("--sequence-height", `${featureGallery.offsetHeight + featureScroll.distance}px`);
+    featureScroll.start = featureSequence.getBoundingClientRect().top + scrollY - pinTop;
+    featureScroll.top = pinTop;
+    featureScroll.enabled = featureScroll.distance > 0;
+    if (wasInside && featureScroll.enabled) {
+      window.scrollTo({ top: featureScroll.start + previousProgress * featureScroll.distance, behavior: "instant" });
+    }
+    syncFeatureScroll();
+  } else {
+    featureGallery.style.removeProperty("--slide-width");
+    featureDescriptions.forEach((description) => { description.style.minHeight = ""; });
+    const slide = featureSlides.find((item) => item.dataset.slide === selectedFeature);
+    featureTrack.scrollTo({ left: slide.offsetLeft - parseFloat(getComputedStyle(featureTrack).paddingLeft), behavior: "instant" });
+  }
+  const hint = document.querySelector(".feature-scroll-cue [data-i18n]");
+  hint.dataset.i18n = featureScroll.enabled ? "features.hint" : "features.swipeHint";
+  hint.textContent = t(hint.dataset.i18n);
+  featureSlides.forEach((slide) => { slide.querySelector("img").sizes = `${slide.offsetWidth}px`; });
+  updateFeatureNavigation();
+}
+
+function queueFeatureLayout(progress) {
+  if (typeof progress === "number") pendingFeatureProgress = progress;
+  if (!featureLayoutFrame) featureLayoutFrame = requestAnimationFrame(configureFeatureScroll);
+}
+
+function syncFeatureScroll() {
+  featureScrollFrame = 0;
+  if (!featureScroll.enabled) return;
+  const left = Math.max(0, Math.min(featureScroll.distance, scrollY - featureScroll.start));
+  if (Math.abs(featureTrack.scrollLeft - left) > 0.5) featureTrack.scrollLeft = left;
+}
+window.addEventListener("scroll", () => {
+  if (!featureScrollFrame) featureScrollFrame = requestAnimationFrame(syncFeatureScroll);
+}, { passive: true });
+window.addEventListener("resize", queueFeatureLayout, { passive: true });
+window.addEventListener("load", queueFeatureLayout, { once: true });
+reducedMotion.addEventListener("change", queueFeatureLayout);
+featureTrack.addEventListener("focusin", (event) => {
+  const slide = event.target.closest("[data-slide]");
+  if (featureScroll.enabled && slide && slide.dataset.slide !== selectedFeature) {
+    moveToFeature(slide.dataset.slide, "instant");
+  }
+});
 
 function renderRatings() {
   demoPhotos.forEach((photo, index) => {
@@ -126,6 +276,8 @@ function renderRatings() {
 }
 
 function setLanguage(value, persist = true) {
+  const preserveProgress = featureScroll.enabled && Math.abs(featureGallery.getBoundingClientRect().top - featureScroll.top) < 2
+    ? Math.max(0, Math.min(1, (scrollY - featureScroll.start) / featureScroll.distance)) : undefined;
   language = value === "zh" ? "zh" : "en";
   root.lang = language === "zh" ? "zh-CN" : "en";
   document.querySelectorAll("[data-i18n]").forEach((element) => {
@@ -150,6 +302,7 @@ function setLanguage(value, persist = true) {
   setTheme(theme, false);
   renderFeature();
   renderRatings();
+  queueFeatureLayout(preserveProgress);
   if (persist) savePreference("swiftcull-site-language", language);
 }
 
@@ -219,3 +372,46 @@ dialog.addEventListener("click", (event) => {
 // English is the first-visit default, regardless of browser locale.
 setTheme(readPreference("swiftcull-site-theme", "light"), false);
 setLanguage(readPreference("swiftcull-site-language", "en"), false);
+
+// Reveal complete content groups once, as they enter the viewport. Content remains
+// visible when JavaScript or IntersectionObserver is unavailable.
+const revealItems = [...document.querySelectorAll("[data-reveal]")];
+let revealObserver;
+function configureReveals() {
+  revealObserver?.disconnect();
+  if (reducedMotion.matches || !("IntersectionObserver" in window)) {
+    root.classList.remove("reveal-ready");
+    revealItems.forEach((element) => element.classList.add("is-visible"));
+    return;
+  }
+  revealObserver = new IntersectionObserver((entries) => {
+    entries.forEach((entry) => {
+      if (!entry.isIntersecting) return;
+      entry.target.classList.add("is-visible");
+      revealObserver.unobserve(entry.target);
+    });
+  }, { threshold: 0.08, rootMargin: "0px 0px -32px 0px" });
+  root.classList.add("reveal-ready");
+  revealItems.forEach((element) => {
+    const bounds = element.getBoundingClientRect();
+    if (bounds.top < innerHeight && bounds.bottom > 0) element.classList.add("is-visible");
+    if (!element.classList.contains("is-visible")) revealObserver.observe(element);
+  });
+}
+configureReveals();
+reducedMotion.addEventListener("change", configureReveals);
+// Keyboard navigation must never leave focus in a visually hidden content group.
+document.addEventListener("focusin", (event) => event.target.closest("[data-reveal]")?.classList.add("is-visible"));
+
+let readingFrame = 0;
+const readingProgress = document.querySelector(".reading-progress > span");
+function updateReadingProgress() {
+  readingFrame = 0;
+  const range = document.documentElement.scrollHeight - innerHeight;
+  readingProgress.style.transform = `scaleX(${range > 0 ? Math.min(1, Math.max(0, scrollY / range)) : 0})`;
+}
+window.addEventListener("scroll", () => {
+  if (!readingFrame) readingFrame = requestAnimationFrame(updateReadingProgress);
+}, { passive: true });
+window.addEventListener("resize", updateReadingProgress, { passive: true });
+updateReadingProgress();
